@@ -1,6 +1,6 @@
 env_params = {
     't_initial': 36000,
-    't_end':  40000,
+    't_end':  36100,
     'delta_t' : 5,  # s
     'vehicle_speed' : 22.788,   # km / h
     'repo_speed' : 1, #目前的设定需要与vehicl speed保持一致
