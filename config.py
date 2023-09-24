@@ -80,6 +80,7 @@ dqn_params = {
     "eps_min": 0.01,  # end epsilon
     "eps_dec": 0.997  # epsilon decay per step
 }
+NUM_EPOCH = 100
 UPDATE_INTERVAL = 20
 TRAIN_DATE_LIST = ['2015-05-04', '2015-05-05', '2015-05-06', '2015-05-07', '2015-05-08', '2015-05-11', '2015-05-12',
                    '2015-05-13', '2015-05-14', '2015-05-15', '2015-05-18']
