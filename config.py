@@ -67,51 +67,7 @@ price_params_dict = {'short': [1.245,0.599,10.629,10.305,0.451],
 #                     'evening': [0,1.21,2.914,5.023,0.013],
 #                     'midnight_early': [1.16,0,0,6.366,0],
 #                     'other': [0,2.053,0.857,4.666,1.961]}
-#  rl for matching
-# global variable and parameters for sarsa
-START_TIMESTAMP = 36000  # the start timestamp
-LEN_TIME_SLICE = 5  # the length of a time slice, 5 minute (300 seconds) in this experiment
-LEN_TIME = 100 # 3 hours
-NUM_EPOCH = 4001  # 4001 / 3001
-FLAG_LOAD = False
-sarsa_params = dict(learning_rate=0.005, discount_rate=0.95)  # parameters in sarsa algorithm
-#  rl for matching
 
-# rl for repositioning
-'''
-# hyperparameters for rl
-NUM_EPOCH = 1301
-STOP_EPOCH = 1300
-DISCOUNT_FACTOR = 0.95
-ACTOR_LR = 0.001
-CRITIC_LR = 0.005
-ACTOR_STRUCTURE = [64,128] #[16, 32] for A2C, and [64, 128] for A2C global aware
-CRITIC_STRUCTURE = [64,128]
-'''
-# rl for repositioning
-
-
-
-#  rl for matching
-# parameters for exploration
-INIT_EPSILON = 0.9
-FINAL_EPSILON = 0
-DECAY = 0.997
-PRE_STEP = 0
-#  rl for matching
-
-#  rl for matching
-# TRAIN_DATE_LIST = ['2015-07-06', '2015-07-07', '2015-07-08', '2015-07-09', '2015-07-10',
-#                    '2015-07-13', '2015-07-14', '2015-07-15', '2015-07-16', '2015-07-17'
-#                    ]
-# TRAIN_DATE_LIST = [i for i in range(36000,36100)]
-TRAIN_DATE_LIST = ['2015-05-04', '2015-05-05', '2015-05-06', '2015-05-07', '2015-05-08',
-                    '2015-05-11', '2015-05-12', '2015-05-13', '2015-05-14', '2015-05-15', '2015-05-18']
-
-TEST_DATE_LIST = ['2015-07-27', '2015-07-28', '2015-07-29', '2015-07-30', '2015-07-31']
-#  rl for matching
-
-# TODO
 # rl for matching radius
 dqn_params = {
     "input_dims": 2,  # (grid_id, time_slice)
