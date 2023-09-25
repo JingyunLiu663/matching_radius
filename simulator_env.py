@@ -1002,15 +1002,14 @@ class Simulator:
             self.end_of_episode = 1
         # rl for matching
         return
-    def step(self, driver_table):
+    def step(self):
         """
         This function used to run the simulator step by step
         """
         # Step 1: order dispatching
         # TODO: apply different radius for each
-        wait_requests = deepcopy(self.wait_requests)
         matched_pair_actual_indexes, matched_itinerary = (
-            order_dispatch_radius(wait_requests, driver_table, self.dispatch_method, self.method))
+            order_dispatch_radius(self.wait_requests, self.driver_table, self.dispatch_method, self.method))
         # Step 2: driver/passenger reaction after dispatching
         df_new_matched_requests, df_update_wait_requests = \
             self.update_info_after_matching_multi_process(matched_pair_actual_indexes, matched_itinerary)

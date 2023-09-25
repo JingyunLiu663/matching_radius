@@ -14,6 +14,11 @@ from dqn import DqnAgent
 import config
 from matplotlib import pyplot as plt
 
+def worker_process(args):
+    agent, simulator, state = args
+    action_index = agent.choose_action(state)
+    return action_index, env_params['radius_action_space'][action_index]
+
 if __name__ == "__main__":
     driver_num = 100
     max_distance_num = 1
@@ -43,8 +48,8 @@ if __name__ == "__main__":
                 start_time = time.time()
                 # for every time interval do:
                 for step in range(simulator.finish_run_step):
-                    driver_table = deepcopy(simulator.driver_table)
-                    idle_driver_table = driver_table[(driver_table['status'] == 0) | (driver_table['status'] == 4)]
+                    idle_driver_table = simulator.driver_table[
+                        (simulator.driver_table['status'] == 0) | (simulator.driver_table['status'] == 4)]
                     # print("idle_driver_table's shape: ", idle_driver_table.shape)
                     # Collect the action taken by each driver, so that we can run the dispatch algorithm and update
                     # the simulating environment
@@ -57,7 +62,7 @@ if __name__ == "__main__":
                         simulator.driver_table['matching_radius'] = env_params['radius_action_space'][action_index]
                     # observe the transition and store the transition in the replay buffer
                   
-                    transition_buffer = simulator.step(driver_table)
+                    transition_buffer = simulator.step()
                     # print("simulator step finished")
                     if transition_buffer:
                         states, action_indices, rewards, next_states = transition_buffer
