@@ -14,10 +14,6 @@ from dqn import DqnAgent
 import config
 from matplotlib import pyplot as plt
 
-def worker_process(args):
-    agent, simulator, state = args
-    action_index = agent.choose_action(state)
-    return action_index, env_params['radius_action_space'][action_index]
 
 if __name__ == "__main__":
     driver_num = 100
