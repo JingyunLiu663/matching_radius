@@ -16,24 +16,26 @@ Attention:
 
 
 class DqnNetwork(nn.Module):
-    def __init__(self, lr: float, input_dims: int, fc1_dims: int, fc2_dims: int, n_actions: int):
+    def __init__(self, input_dims: int, num_layers: int, layers_dimension_list: list, n_actions: int, lr: float):
         """
-        TODO: which optimizer to use? Designed as a tunable configuration?
+        :param input_dims: presumably 2 (time_slice, grid_id)
+        :param num_layers: number of intermediate layers
+        :param layers_dimension_list: a list indicating number of dimension of each layer
+        :param n_actions: the action space
         :param lr: learning rate
-        :param input_dims: input dimension -> state dimension in the RL model
-        :param fc1_dims: fully-connected layer1 (hidden layer)
-        :param fc2_dims: fully-connected layer2 (hidden layer)
-        :param n_actions: # of actions
         """
         super(DqnNetwork, self).__init__()
-        self.input_dims = input_dims
-        self.fc1_dims = fc1_dims
-        self.fc2_dims = fc2_dims
-        self.n_actions = n_actions
+        self.layers = nn.ModuleList()
 
-        self.fc1 = nn.Linear(self.input_dims, self.fc1_dims)
-        self.fc2 = nn.Linear(self.fc1_dims, self.fc2_dims)
-        self.fc3 = nn.Linear(self.fc2_dims, self.n_actions)
+        # input layer
+        self.layers.append(nn.Linear(input_dims, layers_dimension_list[0]))
+
+        # middle layers
+        for i in range(1, num_layers):
+            self.layers.append(nn.Linear(layers_dimension_list[i - 1], layers_dimension_list[i]))
+
+        # output layer
+        self.out = nn.Linear(layers_dimension_list[-1], n_actions)
 
         self.optimizer = optim.Adam(self.parameters(), lr=lr)
         self.loss = nn.MSELoss()
@@ -43,9 +45,10 @@ class DqnNetwork(nn.Module):
         Use ReLu as the activation function
         :param state: A tensor representation of tuple (time_slice, grid_id)
         """
-        x = F.relu(self.fc1(state))
-        x = F.relu(self.fc2(x))
-        actions = self.fc3(x)
+        x = state
+        for layer in self.layers:
+            x = F.relu(layer(x))
+        actions = self.out(x)
         return actions
 
 
@@ -59,28 +62,32 @@ class DqnAgent:
         Action: matching radius applied (km)
     """
 
-    def __init__(self, **params):
-        self.input_dims = params["input_dims"]
-        self.gamma = params["gamma"]
-        self.epsilon = params["epsilon"]
-        self.eps_min = params["eps_min"]
-        self.eps_dec = params["eps_dec"]
-        self.lr = params["lr"]
-        self.num_actions = len(env_params['radius_action_space'])  # TODO
-        self.target_replace_iter = params["target_replace_iter"]  # how often do we update the target network
-        self.mem_size = params["max_mem_size"]
-        self.batch_size = params["batch_size"]
+    def __init__(self, num_layers: int, layers_dimension_list: list, lr=0.005, gamma=0.9, epsilon=0.9, eps_min=0.01,
+                 eps_dec=0.997, target_replace_iter=100, batch_size=8, mem_size=2000):
+        self.num_actions = len(env_params['radius_action_space'])
+        self.num_layers = num_layers
+        self.layers_dimension_list = layers_dimension_list
+        self.input_dims = 2  # (grid_id, time_slice)
+        self.lr = lr
+        self.gamma = gamma
+        self.epsilon = epsilon
+        self.eps_min = eps_min
+        self.eps_dec = eps_dec
+        self.target_replace_iter = target_replace_iter  # how often do we update the target network
+        self.batch_size = batch_size
+        self.mem_size = mem_size
         self.transition_count = 0  # number of transition (s_t, a_t, r_t, s_{t + 1}) recorded
 
         # one network as the network to be evaluated, the other as the fixed target
-        # TODO: make DQN backbone part of the configuration file (so that it can be easily customized and tuned)
-        self.eval_net = DqnNetwork(self.lr, input_dims=self.input_dims, fc1_dims=256, fc2_dims=256,
-                                   n_actions=self.num_actions)
-        self.target_net = DqnNetwork(self.lr, input_dims=self.input_dims, fc1_dims=256, fc2_dims=256,
-                                     n_actions=self.num_actions)
-        
-    def degug_log(self):
-        print("transition_count: ", self.transition_count)
+        self.eval_net = DqnNetwork(input_dims=self.input_dims, num_layers=self.num_layers,
+                                   layers_dimension_list=self.layers_dimension_list,
+                                   n_actions=self.num_actions, lr=self.lr)
+        self.target_net = DqnNetwork(input_dims=self.input_dims, num_layers=self.num_layers,
+                                     layers_dimension_list=self.layers_dimension_list,
+                                     n_actions=self.num_actions, lr=self.lr)
+
+        # to plot the loss curve·
+        self.loss_values = []
 
     def store_transition(self, states, actions, rewards, next_states):
         '''
@@ -171,6 +178,8 @@ class DqnAgent:
 
         # calculate loss and do the back-propagation
         loss = self.eval_net.loss(q_target, q_eval)
+        # to plot the loss curve
+        self.loss_values.append(loss.item())
         self.eval_net.optimizer.zero_grad()
         loss.backward()
         self.eval_net.optimizer.step()
