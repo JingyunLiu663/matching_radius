@@ -1,6 +1,6 @@
-env_params = {
-    't_initial': 36000,
-    't_end':  36100,
+env_params = { 
+    't_initial': 14400, # 4AM
+    't_end':  25200, # 7 AM
     'delta_t' : 5,  # s
     'vehicle_speed' : 22.788,   # km / h
     'repo_speed' : 1, #目前的设定需要与vehicl speed保持一致
@@ -47,6 +47,7 @@ env_params = {
     'method': 'sarsa_no_subway',  #  'sarsa_no_subway' / 'pickup_distance' / 'instant_reward_no_subway'   #  rl for matching
     'reposition_method': 'A2C_global_aware',  # A2C, A2C_global_aware, random_cruise, stay  # rl for repositioning
     'dayparting': True, # if true, simulator_env will compute information based on time periods in a day, e.g. 'morning', 'afternoon'
+    'rl_agent': 'dqn',
 }
 wait_time_params_dict = {'morning': [2.582, 2.491, 0.026, 1.808, 2.581],
                     'evening': [4.862, 2.485, 0, 1.379, 13.456],
@@ -69,17 +70,6 @@ price_params_dict = {'short': [1.245,0.599,10.629,10.305,0.451],
 #                     'other': [0,2.053,0.857,4.666,1.961]}
 
 # rl for matching radius
-dqn_params = {
-    "input_dims": 2,  # (grid_id, time_slice)
-    "gamma": 0.9,
-    "lr": 0.005,
-    "batch_size": 8,
-    "target_replace_iter": 100,
-    "max_mem_size": 2000,
-    "epsilon": 0.9,  # begin epsilon
-    "eps_min": 0.01,  # end epsilon
-    "eps_dec": 0.997  # epsilon decay per step
-}
 NUM_EPOCH = 100
 UPDATE_INTERVAL = 20
 TRAIN_DATE_LIST = ['2015-05-04', '2015-05-05', '2015-05-06', '2015-05-07', '2015-05-08', '2015-05-11', '2015-05-12',
