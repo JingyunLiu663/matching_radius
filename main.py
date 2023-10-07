@@ -13,18 +13,31 @@ from utilities import *
 from dqn import DqnAgent
 import config
 from matplotlib import pyplot as plt
+import argparse
 
+def get_args():
+    parser = argparse.ArgumentParser()
+
+    parser.add_argument('-num_layers', type=int, default=2, help='Number of fully connected layers')
+    parser.add_argument('-layers_dimension_list', type=int, nargs='+', default=[256, 256], help='List of dimensions for each layer')
+    parser.add_argument('-lr', type=float, default=0.005, help='learning rate')
+    parser.add_argument('-gamma', type=float, default=0.9, help='discount rate gamma')
+    parser.add_argument('-epsilon', type=float, default=0.9, help='epsilon greedy - begin epsilon')
+    parser.add_argument('-eps_min', type=float, default=0.01, help='epsilon greedy - end epsilon')
+    parser.add_argument('-eps_dec', type=float, default=0.997, help='epsilon greedy - epsilon decay per step')
+
+    args = parser.parse_args()
+    return args
 
 if __name__ == "__main__":
-    driver_num = 100
-    max_distance_num = 1
-    cruise_flag = True  # taking cruise into consideration
-    pickup_flag = 'rg'
-    delivery_flag = 'rg'
-    # track的格式为[{'driver_1' : [[lng, lat, status, time_a], [lng, lat, status, time_b]],
-    # 'driver_2' : [[lng, lat, status, time_a], [lng, lat, status, time_b]]},
-    # {'driver_1' : [[lng, lat, status, time_a], [lng, lat, status, time_b]]}]
-    track_record = []
+    args = get_args()
+
+    training_log = {
+        'epoch_running_times': [],
+        'epoch_total_rewards': [],
+        'epoch_total_orders': [],
+        'epoch_matched_orders': []
+    }
 
     # initialize the simulator
     simulator = Simulator(**env_params)
@@ -33,7 +46,10 @@ if __name__ == "__main__":
         if simulator.experiment_mode == 'train':
             print("training process:")
             # initialize the RL agent for matching radius setting
-            agent = DqnAgent(**dqn_params)
+            # initialize the RL agent for matching radius setting
+            agent = DqnAgent(num_layers=args.num_layers, layers_dimension_list=args.layers_dimension_list, lr=0.005,
+                             gamma=0.9, epsilon=0.9, eps_min=0.01, eps_dec=0.997, target_replace_iter=100, batch_size=8,
+                             mem_size=2000)
             # log: keep track of the total reward
             total_reward_record = np.zeros(NUM_EPOCH)
             for epoch in range(NUM_EPOCH):
@@ -44,7 +60,8 @@ if __name__ == "__main__":
                 start_time = time.time()
                 # for every time interval do:
                 for step in range(simulator.finish_run_step):
-                    idle_driver_table = simulator.driver_table[
+                    driver_table = deepcopy(simulator.driver_table)
+                    idle_driver_table = driver_table[
                         (simulator.driver_table['status'] == 0) | (simulator.driver_table['status'] == 4)]
                     # print("idle_driver_table's shape: ", idle_driver_table.shape)
                     # Collect the action taken by each driver, so that we can run the dispatch algorithm and update
@@ -57,13 +74,10 @@ if __name__ == "__main__":
                         simulator.driver_table['action_index'] = action_index
                         simulator.driver_table['matching_radius'] = env_params['radius_action_space'][action_index]
                     # observe the transition and store the transition in the replay buffer
-                  
-                    transition_buffer = simulator.step()
-                    # print("simulator step finished")
+                    transition_buffer = simulator.step(idle_driver_table)
                     if transition_buffer:
                         states, action_indices, rewards, next_states = transition_buffer
                         agent.store_transition(states, action_indices, rewards, next_states)
-                    # print("store_transition finished")
                     # FIXME: feed the transition to the DQN after certain batch of data is collected
                     if agent.transition_count % UPDATE_INTERVAL == 0:
                         agent.learn()
@@ -75,21 +89,32 @@ if __name__ == "__main__":
                 print('epoch total reward: ', simulator.total_reward)
                 print("total orders", simulator.total_request_num)
                 print("matched orders", simulator.matched_requests_num)
-                # print("step1:order dispatching:", simulator.time_step1)
-                # print("step2:reaction", simulator.time_step2)
-                # print("step3:bootstrap new orders:", simulator.step3)
-                # print("step4:cruise:", simulator.step4)
-                # print("step4_1:track_recording", simulator.step4_1)
-                # print("step5:update state", simulator.step5)
-                # print("step6:offline update", simulator.step6)
-                # print("step7: update time", simulator.step7)
+                # print("loss", agent.loss_values)
 
-                with open("output3/order_record-1103.pickle", "wb") as f:
-                    pickle.dump(simulator.record, f)
+                training_log['epoch_running_times'].append(end_time - start_time)
+                training_log['epoch_total_rewards'].append(simulator.total_reward)
+                training_log['epoch_total_orders'].append(simulator.total_request_num)
+                training_log['epoch_matched_orders'].append(simulator.matched_requests_num)
+
+                # with open(f"output/{env_params['rl_agent']}.pickle", "wb") as f:
+                #     pickle.dump(simulator.record, f)
                 # if epoch % 200 == 0:  # save the result every 200 epochs
                 #     agent.save_parameters(epoch)
+                if epoch % 8 == 0:
+                    with open(
+                            f"./training_log/{env_params['rl_agent']}_{'_'.join(map(str, args.layers_dimension_list))}.pickle",
+                            'wb') as f:
+                        pickle.dump(training_log, f)
+                    with open(
+                            f"./training_log/{env_params['rl_agent']}_{'_'.join(map(str, args.layers_dimension_list))}_losses.pickle",
+                            "wb") as f:
+                        pickle.dump(agent.loss_values, f)
 
-                if epoch % 200 == 0:  # plot and save training curve
-                    # plt.plot(list(range(epoch)), total_reward_record[:epoch])
-                    with open(load_path + 'training_results_record', 'wb') as f:
-                        pickle.dump(total_reward_record, f)
+            with open(
+                    f"./training_log/{env_params['rl_agent']}_{'_'.join(map(str, args.layers_dimension_list))}.pickle",
+                    'wb') as f:
+                pickle.dump(training_log, f)
+            with open(
+                    f"./training_log/{env_params['rl_agent']}_{'_'.join(map(str, args.layers_dimension_list))}_losses.pickle",
+                    'wb') as f:
+                pickle.dump(agent.loss_values, f)
