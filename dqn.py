@@ -62,8 +62,12 @@ class DqnAgent:
         Action: matching radius applied (km)
     """
 
-    def __init__(self, action_space: list, num_layers: int, layers_dimension_list: list, lr=0.005, gamma=0.9, epsilon=0.9, eps_min=0.01,
-                 eps_dec=0.997, target_replace_iter=100, batch_size=8, mem_size=2000):
+    def __init__(self, action_space: list, num_layers: int, layers_dimension_list: list, lr=0.005, gamma=0.9,
+                 epsilon=0.9, eps_min=0.01, eps_dec=0.997, target_replace_iter=100, batch_size=8, mem_size=2000):
+        self.state_memory = None
+        self.new_state_memory = None
+        self.reward_memory = None
+        self.action_memory = None
         self.num_actions = len(action_space)
         self.num_layers = num_layers
         self.layers_dimension_list = layers_dimension_list
@@ -126,7 +130,6 @@ class DqnAgent:
             self.action_memory[:n_remaining] = actions[n_to_end:]
 
         self.transition_count += n_transitions
-        self.degug_log()
 
     def choose_action(self, observation: tuple):
         """
