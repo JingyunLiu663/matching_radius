@@ -220,6 +220,10 @@ class Simulator:
 
     def reset(self):
         self.initial_base_tables()
+    
+    def log_sout(self, name, obj):
+        print(name + ":")
+        print(obj)
 
     def update_info_after_matching_multi_process(self, matched_pair_actual_indexes, matched_itinerary):
         """
@@ -361,6 +365,7 @@ class Simulator:
                     state_array = np.vstack([self.time + np.zeros(new_matched_requests.shape[0]),
                                              self.driver_table.loc[cor_driver[con_remain], 'grid_id'].values]).T
                     # reward is regularized by radius
+                    self.log_sout("designed_reward", new_matched_requests['designed_reward'].values)
                     reward_array = (new_matched_requests['designed_reward'].values /
                                     self.driver_table.loc[cor_driver[con_remain], 'matching_radius'].values)
                     action_array = self.driver_table.loc[cor_driver[con_remain], 'action_index'].values
