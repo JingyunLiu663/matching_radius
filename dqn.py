@@ -186,3 +186,23 @@ class DqnAgent:
 
         # update epsilon
         self.epsilon = self.epsilon - self.eps_dec if self.epsilon > self.eps_min else self.eps_min
+
+
+    def save_parameters(self, path: str):
+        """
+        Save model parameters.
+        
+        Args:
+        - path (str): The path to save the model parameters.
+        """
+        torch.save(self.eval_net.state_dict(), path)
+
+    def load_parameters(self, path: str):
+        """
+        Load model parameters.
+        
+        Args:
+        - path (str): The path to load the model parameters from.
+        """
+        self.eval_net.load_state_dict(torch.load(path))
+        self.target_net.load_state_dict(torch.load(path))
