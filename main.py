@@ -79,7 +79,7 @@ if __name__ == "__main__":
                         action_index = agent.choose_action(state)
                         # keep track of the action for each driver
                         simulator.driver_table['action_index'] = action_index
-                        simulator.driver_table['matching_radius'] = args.action_sapce[action_index]
+                        simulator.driver_table['matching_radius'] = args.action_space[action_index]
                     # observe the transition and store the transition in the replay buffer
                     transition_buffer = simulator.step(idle_driver_table)
                     if transition_buffer:
