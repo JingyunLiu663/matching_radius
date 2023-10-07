@@ -50,6 +50,11 @@ if __name__ == "__main__":
             agent = DqnAgent(num_layers=args.num_layers, layers_dimension_list=args.layers_dimension_list, lr=0.005,
                              gamma=0.9, epsilon=0.9, eps_min=0.01, eps_dec=0.997, target_replace_iter=100, batch_size=8,
                              mem_size=2000)
+            parameter_path = f"/pre_trained/{env_params['rl_agent']}/{env_params['rl_agent']}_{'_'.join(map(str, args.layers_dimension_list))}_model.pt"
+            # use pre-trained model
+            if env_params['pre_trained']:
+                agent.load_parameters(parameter_path)
+
             # log: keep track of the total reward
             total_reward_record = np.zeros(NUM_EPOCH)
             for epoch in range(NUM_EPOCH):
@@ -100,7 +105,7 @@ if __name__ == "__main__":
                 #     pickle.dump(simulator.record, f)
                 # if epoch % 200 == 0:  # save the result every 200 epochs
                 #     agent.save_parameters(epoch)
-                if epoch % 8 == 0:
+                if epoch % 5 == 0:
                     with open(
                             f"./training_log/{env_params['rl_agent']}_{'_'.join(map(str, args.layers_dimension_list))}.pickle",
                             'wb') as f:
@@ -109,6 +114,7 @@ if __name__ == "__main__":
                             f"./training_log/{env_params['rl_agent']}_{'_'.join(map(str, args.layers_dimension_list))}_losses.pickle",
                             "wb") as f:
                         pickle.dump(agent.loss_values, f)
+                    agent.save_parameters(parameter_path)
 
             with open(
                     f"./training_log/{env_params['rl_agent']}_{'_'.join(map(str, args.layers_dimension_list))}.pickle",

@@ -48,6 +48,7 @@ env_params = {
     'reposition_method': 'A2C_global_aware',  # A2C, A2C_global_aware, random_cruise, stay  # rl for repositioning
     'dayparting': True, # if true, simulator_env will compute information based on time periods in a day, e.g. 'morning', 'afternoon'
     'rl_agent': 'dqn',
+    'pre_trained': False, # load pre-trained parameters
 }
 wait_time_params_dict = {'morning': [2.582, 2.491, 0.026, 1.808, 2.581],
                     'evening': [4.862, 2.485, 0, 1.379, 13.456],
