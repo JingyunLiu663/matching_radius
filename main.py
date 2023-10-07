@@ -52,13 +52,14 @@ if __name__ == "__main__":
             agent = DqnAgent(action_space=args.action_space, num_layers=args.num_layers, layers_dimension_list=args.layers_dimension_list, lr=0.005,
                              gamma=0.9, epsilon=0.9, eps_min=0.01, eps_dec=0.997, target_replace_iter=100, batch_size=8,
                              mem_size=2000)
-            parameter_path = f"/pre_trained/{env_params['rl_agent']}/{env_params['rl_agent']}_{'_'.join(map(str, args.layers_dimension_list))}_model.pt"
+            parameter_path = f"pre_trained/{env_params['rl_agent']}/{env_params['rl_agent']}_{'_'.join(map(str, args.layers_dimension_list))}_model.pt"
             # use pre-trained model
             if env_params['pre_trained']:
                 agent.load_parameters(parameter_path)
 
             # log: keep track of the total reward
             total_reward_record = np.zeros(NUM_EPOCH)
+            print(args.action_space)
             for epoch in range(NUM_EPOCH):
                 simulator.experiment_date = TRAIN_DATE_LIST[epoch % len(TRAIN_DATE_LIST)]
                 # initialize the environment
