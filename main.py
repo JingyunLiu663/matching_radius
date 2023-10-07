@@ -18,6 +18,8 @@ import argparse
 def get_args():
     parser = argparse.ArgumentParser()
 
+    parser.add_argument('-action_space', type=float, nargs='+', default=[0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 4.5, 5.0, 5.5, 6.0], help='action space - list of matching radius')
+
     parser.add_argument('-num_layers', type=int, default=2, help='Number of fully connected layers')
     parser.add_argument('-layers_dimension_list', type=int, nargs='+', default=[256, 256], help='List of dimensions for each layer')
     parser.add_argument('-lr', type=float, default=0.005, help='learning rate')
@@ -47,7 +49,7 @@ if __name__ == "__main__":
             print("training process:")
             # initialize the RL agent for matching radius setting
             # initialize the RL agent for matching radius setting
-            agent = DqnAgent(num_layers=args.num_layers, layers_dimension_list=args.layers_dimension_list, lr=0.005,
+            agent = DqnAgent(action_space=args.action_space, num_layers=args.num_layers, layers_dimension_list=args.layers_dimension_list, lr=0.005,
                              gamma=0.9, epsilon=0.9, eps_min=0.01, eps_dec=0.997, target_replace_iter=100, batch_size=8,
                              mem_size=2000)
             parameter_path = f"/pre_trained/{env_params['rl_agent']}/{env_params['rl_agent']}_{'_'.join(map(str, args.layers_dimension_list))}_model.pt"
@@ -77,7 +79,7 @@ if __name__ == "__main__":
                         action_index = agent.choose_action(state)
                         # keep track of the action for each driver
                         simulator.driver_table['action_index'] = action_index
-                        simulator.driver_table['matching_radius'] = env_params['radius_action_space'][action_index]
+                        simulator.driver_table['matching_radius'] = args.action_sapce[action_index]
                     # observe the transition and store the transition in the replay buffer
                     transition_buffer = simulator.step(idle_driver_table)
                     if transition_buffer:
@@ -107,20 +109,20 @@ if __name__ == "__main__":
                 #     agent.save_parameters(epoch)
                 if epoch % 5 == 0:
                     with open(
-                            f"./training_log/{env_params['rl_agent']}_{'_'.join(map(str, args.layers_dimension_list))}.pickle",
+                            f"./training_log/{env_params['rl_agent']}_{'_'.join(map(str, args.layers_dimension_list))}_actionspace_{len(args.action_space)}.pickle",
                             'wb') as f:
                         pickle.dump(training_log, f)
                     with open(
-                            f"./training_log/{env_params['rl_agent']}_{'_'.join(map(str, args.layers_dimension_list))}_losses.pickle",
+                            f"./training_log/{env_params['rl_agent']}_{'_'.join(map(str, args.layers_dimension_list))}_actionspace_{len(args.action_space)}_losses.pickle",
                             "wb") as f:
                         pickle.dump(agent.loss_values, f)
                     agent.save_parameters(parameter_path)
 
             with open(
-                    f"./training_log/{env_params['rl_agent']}_{'_'.join(map(str, args.layers_dimension_list))}.pickle",
+                    f"./training_log/{env_params['rl_agent']}_{'_'.join(map(str, args.layers_dimension_list))}_actionspace_{len(args.action_space)}.pickle",
                     'wb') as f:
                 pickle.dump(training_log, f)
             with open(
-                    f"./training_log/{env_params['rl_agent']}_{'_'.join(map(str, args.layers_dimension_list))}_losses.pickle",
+                    f"./training_log/{env_params['rl_agent']}_{'_'.join(map(str, args.layers_dimension_list))}_actionspace_{len(args.action_space)}_losses.pickle",
                     'wb') as f:
                 pickle.dump(agent.loss_values, f)

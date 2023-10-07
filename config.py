@@ -14,7 +14,6 @@ env_params = {
     "maximum_price_passenger_can_tolerate_mean":float('inf'), # ￥
     "maximum_price_passenger_can_tolerate_std":0,  # ￥
     'maximal_pickup_distance' : 1,  # km
-    'radius_action_space': [0.5, 0.75, 1.0], #list(np.arange(2.0, 6.5, 0.5)),  # Newly Added: [2.0, 2.5, 3.0, 3.5, 4.0, 4.5, 5.0, 5.5, 6.0]
     'request_interval': 5,  # s
     'cruise_flag' :False,
     'delivery_mode':'rg',

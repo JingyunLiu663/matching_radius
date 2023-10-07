@@ -62,9 +62,9 @@ class DqnAgent:
         Action: matching radius applied (km)
     """
 
-    def __init__(self, num_layers: int, layers_dimension_list: list, lr=0.005, gamma=0.9, epsilon=0.9, eps_min=0.01,
+    def __init__(self, action_space: list, num_layers: int, layers_dimension_list: list, lr=0.005, gamma=0.9, epsilon=0.9, eps_min=0.01,
                  eps_dec=0.997, target_replace_iter=100, batch_size=8, mem_size=2000):
-        self.num_actions = len(env_params['radius_action_space'])
+        self.num_actions = len(action_space)
         self.num_layers = num_layers
         self.layers_dimension_list = layers_dimension_list
         self.input_dims = 2  # (grid_id, time_slice)
