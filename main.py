@@ -20,7 +20,7 @@ import argparse
 def get_args():
     parser = argparse.ArgumentParser()
 
-    parser.add_argument('-rl_agent', type=str, nargs='+', help='RL agent')
+    parser.add_argument('-rl_agent', type=str, nargs='+', default="dqn", help='RL agent')
     # "dqn" "a2c"
     parser.add_argument('-action_space', type=float, nargs='+',
                         default=[0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 4.5, 5.0, 5.5, 6.0],
@@ -114,7 +114,7 @@ if __name__ == "__main__":
                 print('epoch total reward: ', simulator.total_reward)
                 print("total orders", simulator.total_request_num)
                 print("matched orders", simulator.matched_requests_num)
-                # print("loss", agent.loss_values)
+                print("loss", agent.loss_values)
 
                 training_log['epoch_running_times'].append(end_time - start_time)
                 training_log['epoch_total_rewards'].append(simulator.total_reward)
