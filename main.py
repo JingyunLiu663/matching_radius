@@ -11,25 +11,33 @@ warnings.filterwarnings("ignore")
 import os
 from utilities import *
 from dqn import DqnAgent
+from a2c import A2CAgent
 import config
 from matplotlib import pyplot as plt
 import argparse
 
+
 def get_args():
     parser = argparse.ArgumentParser()
 
-    parser.add_argument('-action_space', type=float, nargs='+', default=[0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 4.5, 5.0, 5.5, 6.0], help='action space - list of matching radius')
+    parser.add_argument('-rl_agent', type=str, nargs='+', help='RL agent')
+    # "dqn" "a2c"
+    parser.add_argument('-action_space', type=float, nargs='+',
+                        default=[0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 4.5, 5.0, 5.5, 6.0],
+                        help='action space - list of matching radius')
 
     parser.add_argument('-num_layers', type=int, default=2, help='Number of fully connected layers')
-    parser.add_argument('-layers_dimension_list', type=int, nargs='+', default=[256, 256], help='List of dimensions for each layer')
+    parser.add_argument('-layers_dimension_list', type=int, nargs='+', default=[256, 256],
+                        help='List of dimensions for each layer')
     parser.add_argument('-lr', type=float, default=0.005, help='learning rate')
-    parser.add_argument('-gamma', type=float, default=0.9, help='discount rate gamma')
+    parser.add_argument('-gamma', type=float, default=0.99, help='discount rate gamma')
     parser.add_argument('-epsilon', type=float, default=0.9, help='epsilon greedy - begin epsilon')
     parser.add_argument('-eps_min', type=float, default=0.01, help='epsilon greedy - end epsilon')
     parser.add_argument('-eps_dec', type=float, default=0.997, help='epsilon greedy - epsilon decay per step')
 
     args = parser.parse_args()
     return args
+
 
 if __name__ == "__main__":
     args = get_args()
@@ -48,12 +56,21 @@ if __name__ == "__main__":
         if simulator.experiment_mode == 'train':
             print("training process:")
             # initialize the RL agent for matching radius setting
-            # initialize the RL agent for matching radius setting
-            agent = DqnAgent(action_space=args.action_space, num_layers=args.num_layers, layers_dimension_list=args.layers_dimension_list, lr=0.005,
-                             gamma=0.9, epsilon=0.9, eps_min=0.01, eps_dec=0.997, target_replace_iter=100, batch_size=8,
+            if args.rl_agent == "dqn":
+                agent = DqnAgent(action_space=args.action_space, num_layers=args.num_layers,
+                             layers_dimension_list=args.layers_dimension_list, lr=args.lr,
+                             gamma=args.gamma, epsilon=args.epsilon, eps_min=args.eps_min, eps_dec=args.eps_dec,
+                             target_replace_iter=100, batch_size=8,
                              mem_size=2000)
-            parameter_path = f"pre_trained/{env_params['rl_agent']}/{env_params['rl_agent']}_{'_'.join(map(str, args.layers_dimension_list))}_model.pt"
+                parameter_path = (f"pre_trained/{args.rl_agent}/"
+                                  f"{args.rl_agent}_{'_'.join(map(str, args.layers_dimension_list))}_model.pth")
+            elif args.rl_agent == "a2c":
+                agent = A2CAgent(policy_hidden_dim=128, value_hidden_dim=128, action_dim=len(args.action_space),
+                                 learning_rate=args.lr)
+                parameter_path = f"pre_trained/{args.rl_agent}/{args.rl_agent}_model.pth"
             # use pre-trained model
+            else:
+                pass
             if env_params['pre_trained']:
                 agent.load_parameters(parameter_path)
 
@@ -104,26 +121,23 @@ if __name__ == "__main__":
                 training_log['epoch_total_orders'].append(simulator.total_request_num)
                 training_log['epoch_matched_orders'].append(simulator.matched_requests_num)
 
-                # with open(f"output/{env_params['rl_agent']}.pickle", "wb") as f:
-                #     pickle.dump(simulator.record, f)
-                # if epoch % 200 == 0:  # save the result every 200 epochs
-                #     agent.save_parameters(epoch)
                 if epoch % 5 == 0:
                     with open(
-                            f"./training_log/{env_params['rl_agent']}_{'_'.join(map(str, args.layers_dimension_list))}_actionspace_{len(args.action_space)}.pickle",
+                            f"./training_log/{args.rl_agent}_{'_'.join(map(str, args.layers_dimension_list))}_actionspace_{len(args.action_space)}.pickle",
                             'wb') as f:
                         pickle.dump(training_log, f)
                     with open(
-                            f"./training_log/{env_params['rl_agent']}_{'_'.join(map(str, args.layers_dimension_list))}_actionspace_{len(args.action_space)}_losses.pickle",
+                            f"./training_log/{args.rl_agent}_{'_'.join(map(str, args.layers_dimension_list))}_actionspace_{len(args.action_space)}_losses.pickle",
                             "wb") as f:
                         pickle.dump(agent.loss_values, f)
-                    agent.save_parameters(parameter_path)
+                    if args.rl_agent == "dqn":
+                        agent.save_parameters(parameter_path)
 
             with open(
-                    f"./training_log/{env_params['rl_agent']}_{'_'.join(map(str, args.layers_dimension_list))}_actionspace_{len(args.action_space)}.pickle",
+                    f"./training_log/{args.rl_agent}_{'_'.join(map(str, args.layers_dimension_list))}_actionspace_{len(args.action_space)}.pickle",
                     'wb') as f:
                 pickle.dump(training_log, f)
             with open(
-                    f"./training_log/{env_params['rl_agent']}_{'_'.join(map(str, args.layers_dimension_list))}_actionspace_{len(args.action_space)}_losses.pickle",
+                    f"./training_log/{args.rl_agent}_{'_'.join(map(str, args.layers_dimension_list))}_actionspace_{len(args.action_space)}_losses.pickle",
                     'wb') as f:
                 pickle.dump(agent.loss_values, f)
