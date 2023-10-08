@@ -1046,7 +1046,7 @@ class Simulator:
         # Step 7: update time
         self.update_time()
     
-        return
+        return self.dispatch_transitions_buffer 
 
 
     def rl_step(self, score_agent={}, epsilon=0): # rl for matching
