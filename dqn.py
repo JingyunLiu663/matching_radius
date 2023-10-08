@@ -64,10 +64,10 @@ class DqnAgent:
 
     def __init__(self, action_space: list, num_layers: int, layers_dimension_list: list, lr=0.005, gamma=0.9,
                  epsilon=0.9, eps_min=0.01, eps_dec=0.997, target_replace_iter=100, batch_size=8, mem_size=2000):
-        self.state_memory = None
-        self.new_state_memory = None
-        self.reward_memory = None
-        self.action_memory = None
+        self.state_memory = np.zeros((mem_size, 2))
+        self.new_state_memory = np.zeros((mem_size, 2))
+        self.reward_memory = np.zeros((mem_size, ))
+        self.action_memory = np.zeros((mem_size, ))
         self.num_actions = len(action_space)
         self.num_layers = num_layers
         self.layers_dimension_list = layers_dimension_list
@@ -148,11 +148,16 @@ class DqnAgent:
             # randomize
             action_index = np.random.randint(self.num_actions)
         return action_index
+    
+    def debug(self):
+        print("calling the learn function for the agent to learn")
 
     def learn(self):
         # TODO: only start learning when one batch is filled? If not, keep collecting transition data
         if self.transition_count < self.batch_size:
             return
+        
+        self.debug()
 
         # update the target network parameter
         if self.transition_count % self.target_replace_iter == 0:
