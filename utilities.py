@@ -18,6 +18,7 @@ import pymongo
 import time
 import scipy.stats as st
 from scipy.stats import skewnorm
+from collections import deque
 """
 Here, we load the information of graph network from graphml file.
 """
@@ -909,6 +910,25 @@ class State:
     def __str__(self) -> str:
         return f"({self.time_slice}, {self.grid_id})"
 # rl for matching
+
+
+class ReplayBuffer:
+    def __init__(self, capacity):
+        self.buffer = deque(maxlen=capacity)
+
+    def push(self, states, actions, rewards, next_states):
+        for s, a, r, ns in zip(states, actions, rewards, next_states):
+            self.buffer.append((s, a, r, ns))
+
+    def sample(self, batch_size):
+        '''
+        without replacement
+        '''
+        state, action, reward, next_state = zip(*random.sample(self.buffer, batch_size))
+        return np.array(state), np.array(action), np.array(reward), np.array(next_state)
+
+    def __len__(self):
+        return len(self.buffer)
 
 #############################################################################
 

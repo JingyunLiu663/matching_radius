@@ -31,9 +31,12 @@ def get_args():
                         help='List of dimensions for each layer')
     parser.add_argument('-lr', type=float, default=0.005, help='learning rate')
     parser.add_argument('-gamma', type=float, default=0.99, help='discount rate gamma')
+
+    # thw epsilon will reach close to eps_min after about 2000  - 0.9 * 0.9987^{2000} = 0.01
+    # epsilon_dec = (desired_epsilon / epsilon_start) ** (1/steps)
     parser.add_argument('-epsilon', type=float, default=0.9, help='epsilon greedy - begin epsilon')
     parser.add_argument('-eps_min', type=float, default=0.01, help='epsilon greedy - end epsilon')
-    parser.add_argument('-eps_dec', type=float, default=0.997, help='epsilon greedy - epsilon decay per step')
+    parser.add_argument('-eps_dec', type=float, default=0.9987, help='epsilon greedy - epsilon decay per step')
 
     args = parser.parse_args()
     return args
@@ -57,11 +60,8 @@ if __name__ == "__main__":
             print("training process:")
             # initialize the RL agent for matching radius setting
             if args.rl_agent == "dqn":
-                agent = DqnAgent(action_space=args.action_space, num_layers=args.num_layers,
-                             layers_dimension_list=args.layers_dimension_list, lr=args.lr,
-                             gamma=args.gamma, epsilon=args.epsilon, eps_min=args.eps_min, eps_dec=args.eps_dec,
-                             target_replace_iter=100, batch_size=8,
-                             mem_size=2000)
+                agent = DqnAgent(args.action_space, args.num_layers, args.layers_dimension_list, args.lr, args.gamma,
+                                 args.epsilon, args.eps_min, args.eps_dec, target_replace_iter=10)
                 parameter_path = (f"pre_trained/{args.rl_agent}/"
                                   f"{args.rl_agent}_{'_'.join(map(str, args.layers_dimension_list))}_model.pth")
             elif args.rl_agent == "a2c":
@@ -86,29 +86,26 @@ if __name__ == "__main__":
                 start_time = time.time()
                 # for every time interval do:
                 for step in range(simulator.finish_run_step):
-                    driver_table = deepcopy(simulator.driver_table)
-                    idle_driver_table = driver_table[
-                        (simulator.driver_table['status'] == 0) | (simulator.driver_table['status'] == 4)]
-                    # print("idle_driver_table's shape: ", idle_driver_table.shape)
-                    # Collect the action taken by each driver, so that we can run the dispatch algorithm and update
-                    # the simulating environment
-                    for index, row in idle_driver_table.iterrows():
-                        # map state to action for each driver
-                        state = (simulator.time, row['grid_id'])
-                        action_index = agent.choose_action(state)
-                        # keep track of the action for each driver
-                        simulator.driver_table['action_index'] = action_index
-                        simulator.driver_table['matching_radius'] = args.action_space[action_index]
-                    # observe the transition and store the transition in the replay buffer
-                    transition_buffer = simulator.step(idle_driver_table)
-                    if transition_buffer[0].shape[0] > 0:
-                        states, action_indices, next_states, rewards = transition_buffer
-                        if args.rl_agent == "dqn":
-                            agent.store_transition(states, action_indices, rewards, next_states)
-                    # FIXME: feed the transition to the DQN after certain batch of data is collected
-                    #if agent.transition_count % UPDATE_INTERVAL == 0:
-                        else:
-                            agent.learn(states, action_indices, rewards, next_states)
+                    # Get the boolean mask for idle drivers
+                    is_idle = (simulator.driver_table['status'] == 0) | (simulator.driver_table['status'] == 4)
+                    # Fetch grid_ids for the idle drivers
+                    grid_ids = simulator.driver_table.loc[is_idle, 'grid_id'].values
+                    time_slices = np.full_like(grid_ids, simulator.time)
+                    # Determine the action_indices for the idle drivers
+                    action_indices = agent.choose_action((time_slices, grid_ids))
+                    # Calculate matching radius for the idle drivers
+                    action_space_array = np.array(args.action_space)
+                    matching_radii = action_space_array[action_indices]
+                    # Update the simulator.driver_table in-place for the idle drivers
+                    simulator.driver_table.loc[is_idle, 'action_index'] = action_indices
+                    simulator.driver_table.loc[is_idle, 'matching_radius'] = matching_radii
+
+                    # observe the transition and store the transition in the replay buffer (simulator.dispatch_transitions_buffer)
+                    simulator.step(agent)
+
+                    if len(simulator.replay_buffer) >= BATCH_SIZE and step % 100 == 0:
+                        states, action_indices, rewards, next_states= simulator.replay_buffer.sample(BATCH_SIZE)
+                        agent.learn(states, action_indices, rewards, next_states)
                 end_time = time.time()
                 total_reward_record[epoch] = simulator.total_reward
 

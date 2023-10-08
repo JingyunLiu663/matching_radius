@@ -105,6 +105,9 @@ class Simulator:
         if self.rl_mode == 'reposition':
             self.reposition_method = kwargs['reposition_method']  # rl for repositioning
 
+        # add for matching radius
+        self.replay_buffer = ReplayBuffer(1000)  #TODO
+
     def initial_base_tables(self):
         """
         This function used to initial the driver table and order table
@@ -217,6 +220,7 @@ class Simulator:
 
 
         # TJ
+        self.replay_buffer = ReplayBuffer(1000) # TODO
 
     def reset(self):
         self.initial_base_tables()
@@ -366,6 +370,9 @@ class Simulator:
                     action_array = self.driver_table.loc[cor_driver[con_remain], 'action_index'].values
                     next_state_array = np.vstack([new_matched_requests['t_end'].values,
                                                   new_matched_requests['dest_grid_id'].values]).T
+                    # TODO: might be wrong -> need double check
+                    self.replay_buffer.push(state_array, action_array, reward_array, next_state_array)
+
                 elif self.rl_mode == 'matching':
                     #  rl for matching
                     # generate transitions
@@ -384,11 +391,11 @@ class Simulator:
                         # TJ
                         reward_array = new_matched_requests['designed_reward'].values
                         # TJ
-                self.dispatch_transitions_buffer[0] = np.concatenate([self.dispatch_transitions_buffer[0], state_array])
-                self.dispatch_transitions_buffer[1] = np.concatenate([self.dispatch_transitions_buffer[1], action_array])
-                self.dispatch_transitions_buffer[2] = np.concatenate(
-                    [self.dispatch_transitions_buffer[2], next_state_array])
-                self.dispatch_transitions_buffer[3] = np.concatenate([self.dispatch_transitions_buffer[3], reward_array])
+                    self.dispatch_transitions_buffer[0] = np.concatenate([self.dispatch_transitions_buffer[0], state_array])
+                    self.dispatch_transitions_buffer[1] = np.concatenate([self.dispatch_transitions_buffer[1], action_array])
+                    self.dispatch_transitions_buffer[2] = np.concatenate(
+                        [self.dispatch_transitions_buffer[2], next_state_array])
+                    self.dispatch_transitions_buffer[3] = np.concatenate([self.dispatch_transitions_buffer[3], reward_array])
                 #  rl for matching
             # update matched tracks for one time
             # self.wait_requests[]
@@ -431,7 +438,7 @@ class Simulator:
         self.order_status_all_time.append(new_matched_requests)
         return new_matched_requests, update_wait_requests
 
-    def order_generation(self):
+    def   order_generation(self):
         """
         This function used to generate initial order by different time
         :return:
@@ -1002,12 +1009,13 @@ class Simulator:
             self.end_of_episode = 1
         # rl for matching
         return
-    def step(self, driver_table):
+    def step(self, agent):
         """
         This function used to run the simulator step by step
         """
         # Step 1: order dispatching
         # TODO: apply different radius for each
+        driver_table = deepcopy(self.driver_table)
         wait_requests = deepcopy(self.wait_requests)
         matched_pair_actual_indexes, matched_itinerary = (
             order_dispatch_radius(wait_requests, driver_table, self.dispatch_method, self.method))

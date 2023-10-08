@@ -63,11 +63,7 @@ class DqnAgent:
     """
 
     def __init__(self, action_space: list, num_layers: int, layers_dimension_list: list, lr=0.005, gamma=0.9,
-                 epsilon=0.9, eps_min=0.01, eps_dec=0.997, target_replace_iter=100, batch_size=8, mem_size=2000):
-        self.state_memory = np.zeros((mem_size, 2))
-        self.new_state_memory = np.zeros((mem_size, 2))
-        self.reward_memory = np.zeros((mem_size, ))
-        self.action_memory = np.zeros((mem_size, ))
+                 epsilon=0.9, eps_min=0.01, eps_dec=0.997, target_replace_iter=10):
         self.num_actions = len(action_space)
         self.num_layers = num_layers
         self.layers_dimension_list = layers_dimension_list
@@ -78,111 +74,69 @@ class DqnAgent:
         self.eps_min = eps_min
         self.eps_dec = eps_dec
         self.target_replace_iter = target_replace_iter  # how often do we update the target network
-        self.batch_size = batch_size
-        self.mem_size = mem_size
-        self.transition_count = 0  # number of transition (s_t, a_t, r_t, s_{t + 1}) recorded
+        self.batch_size = BATCH_SIZE
+
+        self.eval_net_update_times = 0
 
         # one network as the network to be evaluated, the other as the fixed target
-        self.eval_net = DqnNetwork(input_dims=self.input_dims, num_layers=self.num_layers,
-                                   layers_dimension_list=self.layers_dimension_list,
-                                   n_actions=self.num_actions, lr=self.lr)
-        self.target_net = DqnNetwork(input_dims=self.input_dims, num_layers=self.num_layers,
-                                     layers_dimension_list=self.layers_dimension_list,
-                                     n_actions=self.num_actions, lr=self.lr)
+        self.eval_net = DqnNetwork(self.input_dims, self.num_layers, self.layers_dimension_list, self.num_actions,
+                                   self.lr)
+        self.target_net = DqnNetwork(self.input_dims, self.num_layers, self.layers_dimension_list, self.num_actions,
+                                     self.lr)
 
         # to plot the loss curve·
         self.loss_values = []
 
-    def store_transition(self, states, actions, rewards, next_states):
-        '''
-        Store one transition record (s_t, a_t, r_t, s_{t + 1}) in the replay buffer;
-        The data is stored in 5 numpy arrays respectively.
-        :param states: tuple(time_slice, grid_id)
-        :param actions: np.int32 -> action index, shall be used with action_space to get the true matching radius value
-        :param rewards: np.float32
-        :param next_states: tuple(time_slice, grid_id)
-        '''
-        n_transitions = len(states)
 
-        # Calculate indices to store the new transitions
-        start_index = self.transition_count % self.mem_size
-        end_index = start_index + n_transitions
-
-        if end_index <= self.mem_size:  # If new data fits within the buffer without wrapping around
-            self.state_memory[start_index:end_index] = states
-            self.new_state_memory[start_index:end_index] = next_states
-            self.reward_memory[start_index:end_index] = rewards
-            self.action_memory[start_index:end_index] = actions
-
-        else:  # If new data exceeds the buffer's end and needs to wrap around
-            # First, fill until the buffer's end
-            n_to_end = self.mem_size - start_index
-            self.state_memory[start_index:] = states[:n_to_end]
-            self.new_state_memory[start_index:] = next_states[:n_to_end]
-            self.reward_memory[start_index:] = rewards[:n_to_end]
-            self.action_memory[start_index:] = actions[:n_to_end]
-
-            # Then, wrap around and overwrite from the beginning
-            n_remaining = n_transitions - n_to_end
-            self.state_memory[:n_remaining] = states[n_to_end:]
-            self.new_state_memory[:n_remaining] = next_states[n_to_end:]
-            self.reward_memory[:n_remaining] = rewards[n_to_end:]
-            self.action_memory[:n_remaining] = actions[n_to_end:]
-
-        self.transition_count += n_transitions
-
-    def choose_action(self, observation: tuple):
+    def choose_action(self, states: np.array):
         """
         Choose action based on epsilon-greedy algorithm
-        :param observation: tuple(time_slice, grid_id)
-        :return: action index (to be used with self.action_space later)
+        :param states: numpy array of shape n * 2
+        :return: numpy array of action index
         """
-        if np.random.random() > self.epsilon:
-            # Convert observation (tuple) into a tensor with shape (1, 2)
-            state_tensor = torch.tensor([observation], dtype=torch.float32)
-            # Greedy action selection
-            with torch.no_grad():
-                actions = self.eval_net(state_tensor)
-                action_index = torch.argmax(actions).item()
-        else:
-            # randomize
-            action_index = np.random.randint(self.num_actions)
-        return action_index
+        n = states.shape[0]
+        # Convert all observations to a tensor
+        state_tensor = torch.tensor(states, dtype=torch.float32)
+        # Compute Q-values for all states in one forward pass
+        with torch.no_grad():
+            q_values = self.eval_net(state_tensor)
+        # Default action selection is greedy
+        action_indices = torch.argmax(q_values, dim=1).cpu().numpy()
+        # Identify agents that should explore
+        explorers = np.random.random(n) < self.epsilon
+        # Generate random actions for explorers
+        action_indices[explorers] = np.random.randint(self.num_actions, size=np.sum(explorers))
+
+        return action_indices
+
     
     def debug(self):
         print("calling the learn function for the agent to learn")
 
-    def learn(self):
-        # TODO: only start learning when one batch is filled? If not, keep collecting transition data
-        if self.transition_count < self.batch_size:
-            return
-        
+    def learn(self, states, action_indices, rewards, next_states):
         self.debug()
 
         # update the target network parameter
-        if self.transition_count % self.target_replace_iter == 0:
+        if self.eval_net_update_times % self.target_replace_iter == 0:
             self.target_net.load_state_dict(self.eval_net.state_dict())
 
-        # max_mem: get the number of available transition records (to sample from)
-        max_mem = min(self.transition_count, self.mem_size)
-        batch = np.random.choice(max_mem, self.batch_size, replace=False)  # TODO: sample without replacement?
-
         # convert numpy array to tensor
-        state_batch = torch.tensor(self.state_memory[batch], dtype=torch.float32)
-        reward_batch = torch.tensor(self.reward_memory[batch], dtype=torch.float32)
-        new_state_batch = torch.tensor(self.new_state_memory[batch], dtype=torch.float32)
-        action_batch = torch.tensor(self.action_memory[batch].squeeze(), dtype=torch.int64)
+        state_batch = torch.tensor(states, dtype=torch.float32)
+        action_batch = torch.tensor(action_indices, dtype=torch.int64)
+        reward_batch = torch.tensor(rewards, dtype=torch.float32)
+        new_state_batch = torch.tensor(next_states, dtype=torch.float32)
 
         # RL learn by batch
-        q_eval = self.eval_net(state_batch)[np.arange(self.batch_size), action_batch]
+        q_eval = self.eval_net(state_batch)[np.arange(BATCH_SIZE), action_batch]
         # Make sure q_eval's first dimension is always equal to batch_size, otherwise the above code will cause error
-        q_next = self.target_net(new_state_batch)  # target network shall be applied here
+
+        q_next = self.target_net(new_state_batch)
         # Side notes:
         #   q_next is a 2-dimensional tensor with shape: (batch_size, num_actions)
         #   torch.max() returns a tuple:
         #     The first element ([0]) is the actual maximum values (in our case, the Q-values).
         #     The second element ([1]) is the indices of these max values.
-        q_target = reward_batch + self.gamma * torch.max(q_next, dim=1)[0]
+        q_target = (reward_batch + self.gamma * torch.max(q_next, dim=1)[0]).detach()
 
         # calculate loss and do the back-propagation
         loss = self.eval_net.loss(q_target, q_eval)
@@ -194,6 +148,8 @@ class DqnAgent:
 
         # update epsilon
         self.epsilon = self.epsilon - self.eps_dec if self.epsilon > self.eps_min else self.eps_min
+
+        self.eval_net_update_times += 1
 
 
     def save_parameters(self, path: str):
