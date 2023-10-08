@@ -20,7 +20,7 @@ import argparse
 def get_args():
     parser = argparse.ArgumentParser()
 
-    parser.add_argument('-rl_agent', type=str, default="a2c", help='RL agent')
+    parser.add_argument('-rl_agent', type=str, default="dqn", help='RL agent')
     # "dqn" "a2c"
     parser.add_argument('-action_space', type=float, nargs='+',
                         default=[0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 4.5, 5.0, 5.5, 6.0],
@@ -64,11 +64,13 @@ if __name__ == "__main__":
                                  args.epsilon, args.eps_min, args.eps_dec, target_replace_iter=10)
                 parameter_path = (f"pre_trained/{args.rl_agent}/"
                                   f"{args.rl_agent}_{'_'.join(map(str, args.layers_dimension_list))}_model.pth")
+                print("dqn agent is created")
             elif args.rl_agent == "a2c":
                 print("a2c agent created")
                 agent = A2CAgent(policy_hidden_dim=128, value_hidden_dim=128, action_dim=len(args.action_space),
                                  learning_rate=args.lr)
                 parameter_path = f"pre_trained/{args.rl_agent}/{args.rl_agent}_model.pth"
+                print("a2c agent is created")
             # use pre-trained model
             else:
                 pass
