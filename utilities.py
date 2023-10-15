@@ -19,6 +19,7 @@ import time
 import scipy.stats as st
 from scipy.stats import skewnorm
 from collections import deque
+import cProfile
 """
 Here, we load the information of graph network from graphml file.
 """
@@ -50,6 +51,7 @@ myclient = pymongo.MongoClient("mongodb://localhost:27017/")
 mydb = myclient["route_network"]
    
 mycollect = mydb['route_list']
+print("collection created")
 
 # define the function to get zone_id of segment node
 def get_zone(lat, lng):
@@ -382,6 +384,16 @@ def route_generation_array(origin_coord_array, dest_coord_array, mode='rg'):
                 ite = [int(item) for item in re['itinerary_node_list'].strip('[').strip(']').split(', ')]
             else:
                 ite = ox.distance.shortest_path(G, origin, dest, weight='length', cpus=16)
+                if ite is None:
+                    ite = [origin, dest]
+                content = {
+                    'node': str(origin) + str(dest),
+                    'itinerary_node_list': str(ite)
+                }
+                try:
+                    mycollect.insert_one(content)
+                except Exception as e:
+                    print(f"Error inserting data for {str(origin) + str(dest)}: {e}")
             if ite is not None and len(ite) > 1:
                 itinerary_node_list.append(ite)
             else:
@@ -665,13 +677,8 @@ def skewed_normal_distribution(u,thegma,k,omega,a,input_size):
 
     return skewnorm.rvs(a,loc=u,scale=thegma,size=input_size)
 
-def debug_log1(object):
-    print("The shape is: ", object.shape)
 
-def debug_log2(a, b):
-    print("number of wait_request is {}, number of idle driver is {}".format(a, b))
-
-def order_dispatch_radius(wait_requests, driver_table, dispatch_method='LD',method='pickup_distance'):
+def order_dispatch_radius(profiler, epoch, step, wait_requests, driver_table, dispatch_method='LD',method='pickup_distance'):
     """
     :param wait_requests: the requests of orders
     :type wait_requests: pandas.DataFrame
@@ -682,25 +689,31 @@ def order_dispatch_radius(wait_requests, driver_table, dispatch_method='LD',meth
     :return: matched_pair_actual_indexs: order and driver pair, matched_itinerary: the itinerary of matched driver
     :rtype: tuple
     """
-    # TODO: Let assume "matching_radius" is store in the driver_table as a column
+    # TODO: Let assume "matching_radius" is store in self.driver_table as a column
     con_ready_to_dispatch = (driver_table['status'] == 0) | (driver_table['status'] == 4)
     idle_driver_table = driver_table[con_ready_to_dispatch]
     num_wait_request = wait_requests.shape[0]
     num_idle_driver = idle_driver_table.shape[0]
     matched_pair_actual_indexs = []
     matched_itinerary = []
-    # debug_log2(num_wait_request, num_idle_driver)
+    # print("num of wait request:", num_wait_request)
+    # print("num idle driver:", num_idle_driver)
     if num_wait_request > 0 and num_idle_driver > 0:
         if dispatch_method == 'LD':
             # generate order driver pairs and corresponding itinerary
+            t1 = time.time()
             request_array_temp = wait_requests.loc[:, ['origin_lng', 'origin_lat', 'order_id', 'weight']]
             request_array = np.repeat(request_array_temp.values, num_idle_driver, axis=0)
             driver_loc_array_temp = idle_driver_table.loc[:, ['lng', 'lat', 'driver_id', 'matching_radius']]
             driver_loc_array = np.tile(driver_loc_array_temp.values, (num_wait_request, 1))
             dis_array = distance_array(request_array[:, :2], driver_loc_array[:, :2])
+            t2 = time.time()
+            print("repeat + tile + distance generation: ", t2 - t1)
             # TODO: compare the distance with matching radius for each idle driver
+            t3 = time.time()
             flag = np.where(dis_array <= driver_loc_array[:, 3])[0]
-            # debug_log1(dis_array)
+            t4 = time.time()
+            print("get flag: ", t4 - t3)
             # debug_log1(driver_loc_array[:, 3])
             if len(flag) > 0:
                 order_driver_pair = np.vstack(
@@ -710,14 +723,24 @@ def order_dispatch_radius(wait_requests, driver_table, dispatch_method='LD',meth
                 driver_indexs = np.array(matched_pair_actual_indexs)[:, 1]
                 request_indexs_new = []
                 driver_indexs_new = []
+                t5 = time.time()
                 for index in request_indexs:
                     request_indexs_new.append(request_array_temp[request_array_temp['order_id'] == int(index)].index.tolist()[0])
                 for index in driver_indexs:
                     driver_indexs_new.append(driver_loc_array_temp[driver_loc_array_temp['driver_id'] == index].index.tolist()[0])
+                t6 = time.time()
+                print("loop through request and driver index: ", t6 - t5)
                 request_array_new = np.array(request_array_temp.loc[request_indexs_new])[:,:2]
                 driver_loc_array_new = np.array(driver_loc_array_temp.loc[driver_indexs_new])[:,:2]
+                t7 = time.time()
+                if step % 1000 == 0: profiler.enable()
                 itinerary_node_list, itinerary_segment_dis_list, dis_array = route_generation_array(
                     driver_loc_array_new, request_array_new, mode=env_params['pickup_mode'])
+                if step % 1000 == 0: 
+                    profiler.disable()
+                    profiler.dump_stats(f'output_epoch_{epoch}_step_{step}.pstats')
+                t8 = time.time()
+                print("route generation array", t8 - t7)
                 # itinerary_node_list_new = []
                 # itinerary_segment_dis_list_new = []
                 # dis_array_new = []
@@ -925,7 +948,7 @@ class ReplayBuffer:
         without replacement
         '''
         state, action, reward, next_state = zip(*random.sample(self.buffer, batch_size))
-        return np.array(state), np.array(action), np.array(reward), np.array(next_state)
+        return np.array(state).astype(np.float32), np.array(action).astype(np.int32), np.array(reward).astype(np.float32), np.array(next_state).astype(np.float32)
 
     def __len__(self):
         return len(self.buffer)

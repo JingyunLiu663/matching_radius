@@ -86,15 +86,17 @@ if __name__ == "__main__":
                 #   simulator.driver_table is constructed (a deep copy of sampled simulator.driver_info)
                 simulator.reset()
                 start_time = time.time()
+                prev = 0 #TODO: debug
                 # for every time interval do:
                 for step in range(simulator.finish_run_step):
                     # Get the boolean mask for idle drivers
                     is_idle = (simulator.driver_table['status'] == 0) | (simulator.driver_table['status'] == 4)
                     # Fetch grid_ids for the idle drivers
-                    grid_ids = simulator.driver_table.loc[is_idle, 'grid_id'].values
-                    time_slices = np.full_like(grid_ids, simulator.time)
+                    grid_ids = simulator.driver_table.loc[is_idle, 'grid_id'].values.reshape(-1, 1)
+                    time_slices = np.full_like(grid_ids, simulator.time).reshape(-1, 1)
                     # Determine the action_indices for the idle drivers
-                    action_indices = agent.choose_action((time_slices, grid_ids))
+                    states_array = np.hstack((time_slices, grid_ids)).astype(np.float32)
+                    action_indices = agent.choose_action(states_array)
                     # Calculate matching radius for the idle drivers
                     action_space_array = np.array(args.action_space)
                     matching_radii = action_space_array[action_indices]
@@ -103,9 +105,14 @@ if __name__ == "__main__":
                     simulator.driver_table.loc[is_idle, 'matching_radius'] = matching_radii
 
                     # observe the transition and store the transition in the replay buffer (simulator.dispatch_transitions_buffer)
-                    simulator.step(agent)
+                    simulator.step()
 
-                    if len(simulator.replay_buffer) >= BATCH_SIZE and step % 100 == 0:
+                    # if len(simulator.replay_buffer) > prev:
+                    #     prev = len(simulator.replay_buffer)
+                    #     print("step", step)
+                    #     print("replay buffer", len(simulator.replay_buffer))
+
+                    if len(simulator.replay_buffer) >= BATCH_SIZE:
                         states, action_indices, rewards, next_states= simulator.replay_buffer.sample(BATCH_SIZE)
                         agent.learn(states, action_indices, rewards, next_states)
                 end_time = time.time()

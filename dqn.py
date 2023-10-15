@@ -96,7 +96,7 @@ class DqnAgent:
         """
         n = states.shape[0]
         # Convert all observations to a tensor
-        state_tensor = torch.tensor(states, dtype=torch.float32)
+        state_tensor = torch.FloatTensor(states)
         # Compute Q-values for all states in one forward pass
         with torch.no_grad():
             q_values = self.eval_net(state_tensor)
