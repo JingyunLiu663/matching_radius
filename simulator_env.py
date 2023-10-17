@@ -1009,16 +1009,16 @@ class Simulator:
             self.end_of_episode = 1
         # rl for matching
         return
-    def step(self, agent):
+    def step(self):
         """
         This function used to run the simulator step by step
         """
         # Step 1: order dispatching
         # TODO: apply different radius for each
-        driver_table = deepcopy(self.driver_table)
-        wait_requests = deepcopy(self.wait_requests)
+        # driver_table = deepcopy(self.driver_table)
+        # wait_requests = deepcopy(self.wait_requests)
         matched_pair_actual_indexes, matched_itinerary = (
-            order_dispatch_radius(wait_requests, driver_table, self.dispatch_method, self.method))
+            order_dispatch_radius(self.wait_requests, self.driver_table, self.dispatch_method, self.method))
         # Step 2: driver/passenger reaction after dispatching
         df_new_matched_requests, df_update_wait_requests = \
             self.update_info_after_matching_multi_process(matched_pair_actual_indexes, matched_itinerary)
@@ -1031,7 +1031,6 @@ class Simulator:
             self.record = pd.concat([self.record, df_new_matched_requests], axis=0, ignore_index=True)
         if len(df_new_matched_requests) != 0:
             self.total_reward += np.sum(df_new_matched_requests['designed_reward'].values)
-            # print("added reward in rl step, reward is {}".format(self.total_reward))
         else:
             self.total_reward += 0
         self.matched_requests_num += len(df_new_matched_requests)

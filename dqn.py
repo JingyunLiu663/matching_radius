@@ -5,6 +5,8 @@ import torch.optim as optim
 import numpy as np
 from config import *
 from utilities import *
+from torch.utils.tensorboard import SummaryWriter
+from datetime import datetime
 
 """
 This script is used for RL to learn the optimal matching radius
@@ -39,6 +41,7 @@ class DqnNetwork(nn.Module):
 
         self.optimizer = optim.Adam(self.parameters(), lr=lr)
         self.loss = nn.MSELoss()
+
 
     def forward(self, state):
         """
@@ -84,8 +87,15 @@ class DqnAgent:
         self.target_net = DqnNetwork(self.input_dims, self.num_layers, self.layers_dimension_list, self.num_actions,
                                      self.lr)
 
-        # to plot the loss curve·
+        # to plot the loss curve
         self.loss_values = []
+   
+        # Create a SummaryWriter object and specify the log directory
+        current_time = datetime.now().strftime('%b%d_%H-%M-%S')
+        log_dir = f'runs/experiment_dqn_{current_time}'
+        self.writer = SummaryWriter(log_dir)
+        hparam_dict = {'lr': lr, 'gamma': gamma, 'epsilon': epsilon, 'eps_min': eps_min, 'eps_dec': eps_dec, 'target_replace_iter': target_replace_iter}
+        self.writer.add_hparams(hparam_dict, {})
 
 
     def choose_action(self, states: np.array):
@@ -96,25 +106,20 @@ class DqnAgent:
         """
         n = states.shape[0]
         # Convert all observations to a tensor
-        state_tensor = torch.FloatTensor(states)
+        state_tensor = torch.tensor(states, dtype=torch.float32)
         # Compute Q-values for all states in one forward pass
         with torch.no_grad():
             q_values = self.eval_net(state_tensor)
         # Default action selection is greedy
-        action_indices = torch.argmax(q_values, dim=1).cpu().numpy()
+        action_indices = torch.argmax(q_values, dim=1).numpy()
         # Identify agents that should explore
         explorers = np.random.random(n) < self.epsilon
         # Generate random actions for explorers
         action_indices[explorers] = np.random.randint(self.num_actions, size=np.sum(explorers))
 
-        return action_indices
-
-    
-    def debug(self):
-        print("calling the learn function for the agent to learn")
+        return action_indices, q_values.numpy()
 
     def learn(self, states, action_indices, rewards, next_states):
-        self.debug()
 
         # update the target network parameter
         if self.eval_net_update_times % self.target_replace_iter == 0:
@@ -140,16 +145,27 @@ class DqnAgent:
 
         # calculate loss and do the back-propagation
         loss = self.eval_net.loss(q_target, q_eval)
+
         # to plot the loss curve
         self.loss_values.append(loss.item())
+        self.writer.add_scalar('Loss', loss.item(), self.eval_net_update_times)
+        self.writer.add_scalar('Reward', np.mean(rewards), self.eval_net_update_times)
+
         self.eval_net.optimizer.zero_grad()
         loss.backward()
         self.eval_net.optimizer.step()
+        
+        # Log weights and biases
+        for name, param in self.eval_net.named_parameters():
+            self.writer.add_histogram(name, param.clone().data.numpy(), self.eval_net_update_times)
 
         # update epsilon
         self.epsilon = self.epsilon - self.eps_dec if self.epsilon > self.eps_min else self.eps_min
 
         self.eval_net_update_times += 1
+
+        self.writer.close()
+    
 
 
     def save_parameters(self, path: str):

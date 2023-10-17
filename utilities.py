@@ -678,7 +678,7 @@ def skewed_normal_distribution(u,thegma,k,omega,a,input_size):
     return skewnorm.rvs(a,loc=u,scale=thegma,size=input_size)
 
 
-def order_dispatch_radius(profiler, epoch, step, wait_requests, driver_table, dispatch_method='LD',method='pickup_distance'):
+def order_dispatch_radius(wait_requests, driver_table, dispatch_method='LD',method='pickup_distance'):
     """
     :param wait_requests: the requests of orders
     :type wait_requests: pandas.DataFrame
@@ -701,20 +701,13 @@ def order_dispatch_radius(profiler, epoch, step, wait_requests, driver_table, di
     if num_wait_request > 0 and num_idle_driver > 0:
         if dispatch_method == 'LD':
             # generate order driver pairs and corresponding itinerary
-            t1 = time.time()
             request_array_temp = wait_requests.loc[:, ['origin_lng', 'origin_lat', 'order_id', 'weight']]
             request_array = np.repeat(request_array_temp.values, num_idle_driver, axis=0)
             driver_loc_array_temp = idle_driver_table.loc[:, ['lng', 'lat', 'driver_id', 'matching_radius']]
             driver_loc_array = np.tile(driver_loc_array_temp.values, (num_wait_request, 1))
             dis_array = distance_array(request_array[:, :2], driver_loc_array[:, :2])
-            t2 = time.time()
-            print("repeat + tile + distance generation: ", t2 - t1)
             # TODO: compare the distance with matching radius for each idle driver
-            t3 = time.time()
             flag = np.where(dis_array <= driver_loc_array[:, 3])[0]
-            t4 = time.time()
-            print("get flag: ", t4 - t3)
-            # debug_log1(driver_loc_array[:, 3])
             if len(flag) > 0:
                 order_driver_pair = np.vstack(
                     [request_array[flag, 2], driver_loc_array[flag, 2], request_array[flag, 3], dis_array[flag]]).T
@@ -723,24 +716,14 @@ def order_dispatch_radius(profiler, epoch, step, wait_requests, driver_table, di
                 driver_indexs = np.array(matched_pair_actual_indexs)[:, 1]
                 request_indexs_new = []
                 driver_indexs_new = []
-                t5 = time.time()
                 for index in request_indexs:
                     request_indexs_new.append(request_array_temp[request_array_temp['order_id'] == int(index)].index.tolist()[0])
                 for index in driver_indexs:
                     driver_indexs_new.append(driver_loc_array_temp[driver_loc_array_temp['driver_id'] == index].index.tolist()[0])
-                t6 = time.time()
-                print("loop through request and driver index: ", t6 - t5)
                 request_array_new = np.array(request_array_temp.loc[request_indexs_new])[:,:2]
                 driver_loc_array_new = np.array(driver_loc_array_temp.loc[driver_indexs_new])[:,:2]
-                t7 = time.time()
-                if step % 1000 == 0: profiler.enable()
                 itinerary_node_list, itinerary_segment_dis_list, dis_array = route_generation_array(
                     driver_loc_array_new, request_array_new, mode=env_params['pickup_mode'])
-                if step % 1000 == 0: 
-                    profiler.disable()
-                    profiler.dump_stats(f'output_epoch_{epoch}_step_{step}.pstats')
-                t8 = time.time()
-                print("route generation array", t8 - t7)
                 # itinerary_node_list_new = []
                 # itinerary_segment_dis_list_new = []
                 # dis_array_new = []

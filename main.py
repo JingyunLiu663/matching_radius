@@ -17,6 +17,7 @@ from matplotlib import pyplot as plt
 import argparse
 
 
+
 def get_args():
     parser = argparse.ArgumentParser()
 
@@ -80,6 +81,9 @@ if __name__ == "__main__":
             # log: keep track of the total reward
             total_reward_record = np.zeros(NUM_EPOCH)
             print(args.action_space)
+
+            profiler = cProfile.Profile()
+
             for epoch in range(NUM_EPOCH):
                 simulator.experiment_date = TRAIN_DATE_LIST[epoch % len(TRAIN_DATE_LIST)]
                 # initialize the environment
@@ -96,7 +100,14 @@ if __name__ == "__main__":
                     time_slices = np.full_like(grid_ids, simulator.time).reshape(-1, 1)
                     # Determine the action_indices for the idle drivers
                     states_array = np.hstack((time_slices, grid_ids)).astype(np.float32)
-                    action_indices = agent.choose_action(states_array)
+                    action_indices, action_q_values = agent.choose_action(states_array)
+
+                    # Log the action indices distribution
+                    agent.writer.add_histogram('action_indices_distribution', action_indices, agent.eval_net_update_times)
+
+                    # Log the q-value distribution
+                    agent.writer.add_histogram('q_value_distribution', action_q_values, agent.eval_net_update_times)
+
                     # Calculate matching radius for the idle drivers
                     action_space_array = np.array(args.action_space)
                     matching_radii = action_space_array[action_indices]
@@ -106,6 +117,7 @@ if __name__ == "__main__":
 
                     # observe the transition and store the transition in the replay buffer (simulator.dispatch_transitions_buffer)
                     simulator.step()
+                    print(f"epoch: {epoch} step: {step}, simulator.replay_buffer{len(simulator.replay_buffer)}")
 
                     # if len(simulator.replay_buffer) > prev:
                     #     prev = len(simulator.replay_buffer)
@@ -113,6 +125,7 @@ if __name__ == "__main__":
                     #     print("replay buffer", len(simulator.replay_buffer))
 
                     if len(simulator.replay_buffer) >= BATCH_SIZE:
+                        print("replay buffer:", len(simulator.replay_buffer))
                         states, action_indices, rewards, next_states= simulator.replay_buffer.sample(BATCH_SIZE)
                         agent.learn(states, action_indices, rewards, next_states)
                 end_time = time.time()
