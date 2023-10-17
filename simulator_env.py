@@ -556,7 +556,7 @@ class Simulator:
                 else:
                     wait_info['maximum_wait_time'] = self.maximum_wait_time_mean
                 wait_info['itinerary_segment_dis_list'] = itinerary_segment_dis_list
-                wait_info['weight'] = wait_info['trip_distance'] * 5
+                wait_info['weight'] = wait_info['designed_reward'] #wait_info['trip_distance'] * 5
                 '''
                 # add extra info of orders
                 # 添加分布  价格高的删除
