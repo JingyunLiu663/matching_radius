@@ -15,8 +15,12 @@ from a2c import A2CAgent
 import config
 from matplotlib import pyplot as plt
 import argparse
+import optuna
+from optuna.integration import TensorBoardCallback
 
-
+def objective(trial):
+    num_layers = trial.suggest_int('num_layers', 2, 3)
+    layers_dimension_list = [trial.suggest_categorical(f'neurons_layer_{i}', [64, 128, 256, 512]) for i in range(num_layers)]
 
 def get_args():
     parser = argparse.ArgumentParser()
@@ -24,7 +28,7 @@ def get_args():
     parser.add_argument('-rl_agent', type=str, default="dqn", help='RL agent')
     # "dqn" "a2c"
     parser.add_argument('-action_space', type=float, nargs='+',
-                        default=[0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 4.5, 5.0, 5.5, 6.0],
+                        default=[0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0],
                         help='action space - list of matching radius')
 
     parser.add_argument('-num_layers', type=int, default=2, help='Number of fully connected layers')
@@ -55,6 +59,13 @@ if __name__ == "__main__":
 
     # initialize the simulator
     simulator = Simulator(**env_params)
+
+    study = optuna.create_study()
+    study.optimize(objective, n_trials=100)  # You can adjust the number of trials.
+    # Print the result
+    best_params = study.best_params
+    best_score = study.best_value
+    print(f"Best parameters: {best_params}\nScore: {best_score}")
 
     if env_params['rl_mode'] == "matching_radius":
         if simulator.experiment_mode == 'train':
@@ -100,13 +111,10 @@ if __name__ == "__main__":
                     time_slices = np.full_like(grid_ids, simulator.time).reshape(-1, 1)
                     # Determine the action_indices for the idle drivers
                     states_array = np.hstack((time_slices, grid_ids)).astype(np.float32)
-                    action_indices, action_q_values = agent.choose_action(states_array)
+                    action_indices = agent.choose_action(states_array)
 
                     # Log the action indices distribution
                     agent.writer.add_histogram('action_indices_distribution', action_indices, agent.eval_net_update_times)
-
-                    # Log the q-value distribution
-                    agent.writer.add_histogram('q_value_distribution', action_q_values, agent.eval_net_update_times)
 
                     # Calculate matching radius for the idle drivers
                     action_space_array = np.array(args.action_space)
@@ -117,15 +125,8 @@ if __name__ == "__main__":
 
                     # observe the transition and store the transition in the replay buffer (simulator.dispatch_transitions_buffer)
                     simulator.step()
-                    print(f"epoch: {epoch} step: {step}, simulator.replay_buffer{len(simulator.replay_buffer)}")
-
-                    # if len(simulator.replay_buffer) > prev:
-                    #     prev = len(simulator.replay_buffer)
-                    #     print("step", step)
-                    #     print("replay buffer", len(simulator.replay_buffer))
 
                     if len(simulator.replay_buffer) >= BATCH_SIZE:
-                        print("replay buffer:", len(simulator.replay_buffer))
                         states, action_indices, rewards, next_states= simulator.replay_buffer.sample(BATCH_SIZE)
                         agent.learn(states, action_indices, rewards, next_states)
                 end_time = time.time()
@@ -145,52 +146,52 @@ if __name__ == "__main__":
                 training_log['epoch_total_orders'].append(simulator.total_request_num)
                 training_log['epoch_matched_orders'].append(simulator.matched_requests_num)
 
-                if epoch % 5 == 0:
+                if epoch % 10 == 0:
                     if args.rl_agent == "dqn":
                         with open(
-                                f"./training_log/{args.rl_agent}_{'_'.join(map(str, args.layers_dimension_list))}_actionspace_{len(args.action_space)}.pickle",
+                                f"./training_log/{args.rl_agent}_{'_'.join(map(str, args.layers_dimension_list))}_actionspace_{'_'.join(map(str, args.action_space))}.pickle",
                                 'wb') as f:
                             pickle.dump(training_log, f)
                         with open(
-                                f"./training_log/{args.rl_agent}_{'_'.join(map(str, args.layers_dimension_list))}_actionspace_{len(args.action_space)}_losses.pickle",
+                                f"./training_log/{args.rl_agent}_{'_'.join(map(str, args.layers_dimension_list))}_actionspace_{'_'.join(map(str, args.action_space))}_losses.pickle",
                                 "wb") as f:
                             pickle.dump(agent.loss_values, f)
                         agent.save_parameters(parameter_path)
                     else:
                         with open(
-                                f"./training_log/{args.rl_agent}_{'_'.join(map(str, args.layers_dimension_list))}_actionspace_{len(args.action_space)}.pickle",
+                                f"./training_log/{args.rl_agent}_{'_'.join(map(str, args.layers_dimension_list))}_actionspace_{'_'.join(map(str, args.action_space))}.pickle",
                                 'wb') as f:
                             pickle.dump(training_log, f)
                         with open(
-                                f"./training_log/{args.rl_agent}_{'_'.join(map(str, args.layers_dimension_list))}_actionspace_{len(args.action_space)}_policy_loss.pickle",
+                                f"./training_log/{args.rl_agent}_{'_'.join(map(str, args.layers_dimension_list))}_actionspace_{'_'.join(map(str, args.action_space))}_policy_loss.pickle",
                                 "wb") as f:
                             pickle.dump(agent.policy_loss_list, f)
                         with open(
-                                f"./training_log/{args.rl_agent}_{'_'.join(map(str, args.layers_dimension_list))}_actionspace_{len(args.action_space)}_value_loss.pickle",
+                                f"./training_log/{args.rl_agent}_{'_'.join(map(str, args.layers_dimension_list))}_actionspace_{'_'.join(map(str, args.action_space))}_value_loss.pickle",
                                 "wb") as f:
                             pickle.dump(agent.value_loss_list, f)
                         # agent.save_parameters("pre_trained/a2c/")
 
                 if args.rl_agent == "dqn":
                     with open(
-                            f"./training_log/{args.rl_agent}_{'_'.join(map(str, args.layers_dimension_list))}_actionspace_{len(args.action_space)}.pickle",
+                            f"./training_log/{args.rl_agent}_{'_'.join(map(str, args.layers_dimension_list))}_actionspace_{'_'.join(map(str, args.action_space))}.pickle",
                             'wb') as f:
                         pickle.dump(training_log, f)
                     with open(
-                            f"./training_log/{args.rl_agent}_{'_'.join(map(str, args.layers_dimension_list))}_actionspace_{len(args.action_space)}_losses.pickle",
+                            f"./training_log/{args.rl_agent}_{'_'.join(map(str, args.layers_dimension_list))}_actionspace_{'_'.join(map(str, args.action_space))}_losses.pickle",
                             "wb") as f:
                         pickle.dump(agent.loss_values, f)
                     agent.save_parameters(parameter_path)
                 else:
                     with open(
-                            f"./training_log/{args.rl_agent}_{'_'.join(map(str, args.layers_dimension_list))}_actionspace_{len(args.action_space)}.pickle",
+                            f"./training_log/{args.rl_agent}_{'_'.join(map(str, args.layers_dimension_list))}_actionspace_{'_'.join(map(str, args.action_space))}.pickle",
                             'wb') as f:
                         pickle.dump(training_log, f)
                     with open(
-                            f"./training_log/{args.rl_agent}_{'_'.join(map(str, args.layers_dimension_list))}_actionspace_{len(args.action_space)}_policy_loss.pickle",
+                            f"./training_log/{args.rl_agent}_{'_'.join(map(str, args.layers_dimension_list))}_actionspace_{'_'.join(map(str, args.action_space))}_policy_loss.pickle",
                             "wb") as f:
                         pickle.dump(agent.policy_loss_list, f)
                     with open(
-                            f"./training_log/{args.rl_agent}_{'_'.join(map(str, args.layers_dimension_list))}_actionspace_{len(args.action_space)}_value_loss.pickle",
+                            f"./training_log/{args.rl_agent}_{'_'.join(map(str, args.layers_dimension_list))}_actionspace_{'_'.join(map(str, args.action_space))}_value_loss.pickle",
                             "wb") as f:
                         pickle.dump(agent.value_loss_list, f)

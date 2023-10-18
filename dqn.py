@@ -65,8 +65,8 @@ class DqnAgent:
         Action: matching radius applied (km)
     """
 
-    def __init__(self, action_space: list, num_layers: int, layers_dimension_list: list, lr=0.005, gamma=0.9,
-                 epsilon=0.9, eps_min=0.01, eps_dec=0.997, target_replace_iter=10):
+    def __init__(self, action_space: list, num_layers: int, layers_dimension_list: list, lr=0.0005, gamma=0.99,
+                 epsilon=1.0, eps_min=0.01, eps_dec=0.997, target_replace_iter=2000):
         self.num_actions = len(action_space)
         self.num_layers = num_layers
         self.layers_dimension_list = layers_dimension_list
@@ -91,10 +91,10 @@ class DqnAgent:
         self.loss_values = []
    
         # Create a SummaryWriter object and specify the log directory
-        current_time = datetime.now().strftime('%b%d_%H-%M-%S')
-        log_dir = f'runs/experiment_dqn_{current_time}'
+        # current_time = datetime.now().strftime('%b%d_%H-%M-%S')
+        log_dir = f"runs/experiment_dqn_{'_'.join(map(str, self.layers_dimension_list))}_{'_'.join(map(str, action_space))}"
         self.writer = SummaryWriter(log_dir)
-        hparam_dict = {'lr': lr, 'gamma': gamma, 'epsilon': epsilon, 'eps_min': eps_min, 'eps_dec': eps_dec, 'target_replace_iter': target_replace_iter}
+        hparam_dict = {'lr': self.lr, 'gamma': self.gamma, 'epsilon': self.epsilon, 'eps_min': self.eps_min, 'eps_dec': self.eps_dec, 'target_replace_iter': self.target_replace_iter}
         self.writer.add_hparams(hparam_dict, {})
 
 
@@ -117,7 +117,7 @@ class DqnAgent:
         # Generate random actions for explorers
         action_indices[explorers] = np.random.randint(self.num_actions, size=np.sum(explorers))
 
-        return action_indices, q_values.numpy()
+        return action_indices
 
     def learn(self, states, action_indices, rewards, next_states):
 

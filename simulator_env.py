@@ -106,7 +106,7 @@ class Simulator:
             self.reposition_method = kwargs['reposition_method']  # rl for repositioning
 
         # add for matching radius
-        self.replay_buffer = ReplayBuffer(1000)  #TODO
+        self.replay_buffer = ReplayBuffer(100000)  #TODO
 
     def initial_base_tables(self):
         """
@@ -438,7 +438,7 @@ class Simulator:
         self.order_status_all_time.append(new_matched_requests)
         return new_matched_requests, update_wait_requests
 
-    def   order_generation(self):
+    def order_generation(self):
         """
         This function used to generate initial order by different time
         :return:
@@ -506,59 +506,16 @@ class Simulator:
                     reward_list.append((2.5 + 0.5 * int(max(0, dis * 1000 - 322) / 322) * (
                                 1 + env_params['price_increasing_percentage'])))
                 wait_info['designed_reward'] = reward_list
-                '''
-                if self.rl_mode == 'matching' or self.rl_mode == 'matching_radius':
-                    wait_info['designed_reward'] = 2.5 + 0.5 * int(max(0,trip_distance*1000-322)/322)
-                elif self.rl_mode == 'reposition':
-                    wait_info['designed_reward'] = 2.5 + 0.5 * int(max(0,trip_distance-322)/322)
-                    wait_info['immediate_reward'] = 0
-                '''
-                
-                '''                                              
-                if self.dayparting == True:
-                    if self.time >= 25200 and self.time <=32400:
-                        params = time_params_dict['morning']
-                    elif self.time >= 61200 and self.time <= 68400:
-                        params = time_params_dict['evening']
-                    elif self.time >= 0 and self.time <= 18000:
-                        params = time_params_dict['midnight_early']
-                    else:
-                        params = time_params_dict['other']
-                    wait_info['maximum_wait_time'].apply(skewed_normal_distribution(params[0],params[1],params[2],params[3],params[4]))
-                else:
-                    wait_info['maximum_wait_time'] = self.maximum_wait_time_mean
-                '''
+    
                  # rl for matching
 
                 wait_info['wait_time'] = 0
                 wait_info['status'] = 0
-                if self.dayparting == True:
-                    wait_params = None
-                    if self.time >= 25200 and self.time <=32400:
-                        wait_params = wait_time_params_dict['morning']                
-                        pick_params = pick_time_params_dict['morning']
-                        # price_increase_params = price_increase_params_dict['morning']
-                    elif self.time >= 61200 and self.time <= 68400:
-                        wait_params = wait_time_params_dict['evening']
-                        pick_params = pick_time_params_dict['evening']
-                        # price_increase_params = price_increase_params_dict['evening']
-                    elif self.time >= 0 and self.time <= 18000:
-                        wait_params = wait_time_params_dict['midnight_early']
-                        pick_params = pick_time_params_dict['midnight_early']
-                        # price_increase_params = price_increase_params_dict['midnight_early']
-                    else:
-                        wait_params = wait_time_params_dict['other']
-                        pick_params = pick_time_params_dict['other']
-                        # price_increase_params = price_increase_params_dict['other']
-
-                    wait_info['maximum_wait_time'] = skewed_normal_distribution(wait_params[0],wait_params[1],wait_params[2],wait_params[3],wait_params[4],len(wait_info)) * 60
-                    wait_info['maximum_pickup_time_passenger_can_tolerate'] = skewed_normal_distribution(pick_params[0],pick_params[1],pick_params[2],pick_params[3],pick_params[4],len(wait_info)) * 60
-                else:
-                    wait_info['maximum_wait_time'] = self.maximum_wait_time_mean
+                
+                wait_info['maximum_wait_time'] = self.maximum_wait_time_mean
                 wait_info['itinerary_segment_dis_list'] = itinerary_segment_dis_list
                 wait_info['weight'] = wait_info['designed_reward'] #wait_info['trip_distance'] * 5
-                '''
-                # add extra info of orders
+              
                 # 添加分布  价格高的删除
                 wait_info['maximum_price_passenger_can_tolerate'] = np.random.normal(
                     env_params['maximum_price_passenger_can_tolerate_mean'],
@@ -571,29 +528,10 @@ class Simulator:
                     env_params['maximum_pickup_time_passenger_can_tolerate_mean'],
                     env_params['maximum_pickup_time_passenger_can_tolerate_std'],
                     len(wait_info))
-                '''
-                 # 添加分布  价格高的删除
-                
-                short_wait = len(wait_info[wait_info['trip_distance'] <= 2])
-                short_medium = len(wait_info[(wait_info['trip_distance'] > 2) & (wait_info['trip_distance'] <=5 )])
-                medium_long = len(wait_info[(wait_info['trip_distance'] > 5) & (wait_info['trip_distance'] <=20) ])
-                long_ = len(wait_info[wait_info['trip_distance'] > 20 ])
-                column_name_ = wait_info.columns.tolist()
-                column_name_.append('maximum_price_passenger_can_tolerate')
-                wait_info = wait_info.reindex(columns=column_name_,fill_value=0)
-            
-                wait_info.loc[(wait_info['trip_distance'] <= 2),['maximum_price_passenger_can_tolerate']] = skewed_normal_distribution(price_params_dict['short'][0],price_params_dict['short'][1],price_params_dict['short'][2],price_params_dict['short'][3],price_params_dict['short'][4],short_wait)
-                wait_info.loc[(wait_info['trip_distance'] > 2) & (wait_info['trip_distance'] <=5 ),['maximum_price_passenger_can_tolerate']] = skewed_normal_distribution(price_params_dict['short_medium'][0],price_params_dict['short_medium'][1],price_params_dict['short_medium'][2],price_params_dict['short_medium'][3],price_params_dict['short_medium'][4],short_medium)
-                wait_info.loc[(wait_info['trip_distance'] > 5) & (wait_info['trip_distance'] <=20),['maximum_price_passenger_can_tolerate']] = skewed_normal_distribution(price_params_dict['medium_long'][0],price_params_dict['medium_long'][1],price_params_dict['medium_long'][2],price_params_dict['medium_long'][3],price_params_dict['medium_long'][4],medium_long)
-                wait_info.loc[(wait_info['trip_distance'] > 20),['maximum_price_passenger_can_tolerate']] = skewed_normal_distribution(price_params_dict['long'][0],price_params_dict['long'][1],price_params_dict['long'][2],price_params_dict['long'][3],price_params_dict['long'][4],long_)
 
+                # wait_info = wait_info.drop(columns=['trip_distance'])
+                # wait_info = wait_info.drop(columns=['designed_reward'])
                 self.wait_requests = pd.concat([self.wait_requests, wait_info], ignore_index=True)
-            
-                # statistics
-                self.total_request_num += wait_info.shape[0]
-                self.long_requests_num += wait_info[wait_info['trip_time'] >= 600].shape[0]
-                self.short_requests_num += wait_info[wait_info['trip_time'] <= 300].shape[0]
-                self.medium_requests_num = self.total_request_num - self.long_requests_num - self.short_requests_num
 
         return
 
@@ -1014,8 +952,8 @@ class Simulator:
         This function used to run the simulator step by step
         """
         # Step 1: order dispatching
-        # TODO: apply different radius for each
-        # driver_table = deepcopy(self.driver_table)
+        # TODO: apply different radius for eac%h
+        # driver_table = deepcopy(self.driver_table)··
         # wait_requests = deepcopy(self.wait_requests)
         matched_pair_actual_indexes, matched_itinerary = (
             order_dispatch_radius(self.wait_requests, self.driver_table, self.dispatch_method, self.method))

@@ -45,7 +45,7 @@ env_params = {
     'rl_mode': 'matching_radius',  # ['reposition', 'matching', 'matching_radius']
     'method': 'sarsa_no_subway',  #  'sarsa_no_subway' / 'pickup_distance' / 'instant_reward_no_subway'   #  rl for matching
     'reposition_method': 'A2C_global_aware',  # A2C, A2C_global_aware, random_cruise, stay  # rl for repositioning
-    'dayparting': True, # if true, simulator_env will compute information based on time periods in a day, e.g. 'morning', 'afternoon'
+    'dayparting': False, # if true, simulator_env will compute information based on time periods in a day, e.g. 'morning', 'afternoon'
     'pre_trained': False, # load pre-trained parameters
 }
 wait_time_params_dict = {'morning': [2.582, 2.491, 0.026, 1.808, 2.581],
@@ -70,7 +70,7 @@ price_params_dict = {'short': [1.245,0.599,10.629,10.305,0.451],
 
 # rl for matching radius
 NUM_EPOCH = 100
-BATCH_SIZE = 64  # 128/256
+BATCH_SIZE = 128  # 128/256
 TRAIN_DATE_LIST = ['2015-05-04', '2015-05-05', '2015-05-06', '2015-05-07', '2015-05-08', '2015-05-11', '2015-05-12',
                    '2015-05-13', '2015-05-14', '2015-05-15', '2015-05-18']
 TEST_DATE_LIST = ['2015-07-27', '2015-07-28', '2015-07-29', '2015-07-30', '2015-07-31']
