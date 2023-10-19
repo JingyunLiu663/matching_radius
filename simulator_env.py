@@ -223,9 +223,6 @@ class Simulator:
         self.step7 = 0
 
 
-        # TJ
-        self.replay_buffer = ReplayBuffer(1000) # TODO
-
     def reset(self):
         self.initial_base_tables()
 
