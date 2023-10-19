@@ -101,7 +101,11 @@ class Simulator:
         self.request_database = None
         # TJ
         self.total_reward = 0
-        # TJ
+        #TJ
+        #JL
+        self.total_pickup_dist = 0
+        self.total_reward_per_pickup_dist = 0
+        # JL
         if self.rl_mode == 'reposition':
             self.reposition_method = kwargs['reposition_method']  # rl for repositioning
 
@@ -307,6 +311,10 @@ class Simulator:
             new_matched_requests = df_matched[con_remain]
             new_matched_requests['t_matched'] = self.time
             new_matched_requests['pickup_distance'] = matched_itinerary_df[con_remain]['pickup_distance'].values
+            #TODO
+            # JL: added for matching radius 
+            # new_matched_requests['reward_per_pickup_dist'] = new_matched_requests['designed_reward'] / new_matched_requests['pickup_distance'] 
+            # JL
             new_matched_requests['pickup_time'] = new_matched_requests['pickup_distance'].values / self.vehicle_speed * 3600
             new_matched_requests['t_end'] = self.time + new_matched_requests['pickup_time'].values + new_matched_requests['trip_time'].values
             new_matched_requests['status'] = 1
@@ -355,7 +363,6 @@ class Simulator:
             self.driver_table.loc[cor_driver[con_remain], 'remaining_time_for_current_node'] = \
                 matched_itinerary_df[con_remain]['itinerary_segment_dis_list'].map(lambda x: x[0]).values / self.vehicle_speed * 3600
 
-             # TODO: reuse the dispatch RL logic?
             if self.rl_mode == "matching_radius" or self.rl_mode == 'matching':
                 state_array = None
                 action_array = None
@@ -370,7 +377,6 @@ class Simulator:
                     action_array = self.driver_table.loc[cor_driver[con_remain], 'action_index'].values
                     next_state_array = np.vstack([new_matched_requests['t_end'].values,
                                                   new_matched_requests['dest_grid_id'].values]).T
-                    # TODO: might be wrong -> need double check
                     self.replay_buffer.push(state_array, action_array, reward_array, next_state_array)
 
                 elif self.rl_mode == 'matching':
@@ -947,19 +953,18 @@ class Simulator:
             self.end_of_episode = 1
         # rl for matching
         return
+    
     def step(self):
         """
         This function used to run the simulator step by step
         """
         # Step 1: order dispatching
-        # TODO: apply different radius for eac%h
-        # driver_table = deepcopy(self.driver_table)··
-        # wait_requests = deepcopy(self.wait_requests)
         matched_pair_actual_indexes, matched_itinerary = (
             order_dispatch_radius(self.wait_requests, self.driver_table, self.dispatch_method, self.method))
         # Step 2: driver/passenger reaction after dispatching
         df_new_matched_requests, df_update_wait_requests = \
             self.update_info_after_matching_multi_process(matched_pair_actual_indexes, matched_itinerary)
+        
         self.matched_requests = pd.concat([self.matched_requests, df_new_matched_requests], axis=0)
         self.matched_requests = self.matched_requests.reset_index(drop=True)
         self.wait_requests = df_update_wait_requests.reset_index(drop=True)
@@ -967,14 +972,21 @@ class Simulator:
             self.record = df_new_matched_requests
         else:
             self.record = pd.concat([self.record, df_new_matched_requests], axis=0, ignore_index=True)
+
+        # keep track of total rewards
         if len(df_new_matched_requests) != 0:
             self.total_reward += np.sum(df_new_matched_requests['designed_reward'].values)
+            self.total_pickup_dist += np.sum(df_new_matched_requests['pickup_distance'].values)
+            self.total_reward_per_pickup_dist +=  self.total_reward / self.total_pickup_dist
         else:
             self.total_reward += 0
+            self.total_reward_per_pickup_dist += 0
+            
         self.matched_requests_num += len(df_new_matched_requests)
 
         # Step 3: bootstrap new orders
         self.order_generation()
+
         # Step 4: both-rg-cruising and/or repositioning decision
         self.cruise_and_reposition()
 
@@ -990,8 +1002,7 @@ class Simulator:
 
         # Step 7: update time
         self.update_time()
-    
-        return self.dispatch_transitions_buffer 
+
 
 
     def rl_step(self, score_agent={}, epsilon=0): # rl for matching
