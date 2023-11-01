@@ -381,8 +381,10 @@ def route_generation_array(origin_coord_array, dest_coord_array, mode='rg'):
             }
             re = mycollect.find_one(data)
             if re:
+                print("re found in MongoDB")
                 ite = [int(item) for item in re['itinerary_node_list'].strip('[').strip(']').split(', ')]
             else:
+                print("re not found in MongoDB")
                 ite = ox.distance.shortest_path(G, origin, dest, weight='length', cpus=16)
                 if ite is None:
                     ite = [origin, dest]
@@ -678,7 +680,7 @@ def skewed_normal_distribution(u,thegma,k,omega,a,input_size):
     return skewnorm.rvs(a,loc=u,scale=thegma,size=input_size)
 
 
-def order_dispatch_radius(wait_requests, driver_table, dispatch_method='LD',method='pickup_distance'):
+def order_dispatch_radius(wait_requests, driver_table, dispatch_method='LD',method='pickup_distance', adjust_reward_by_radius=False):
     """
     :param wait_requests: the requests of orders
     :type wait_requests: pandas.DataFrame
@@ -689,15 +691,13 @@ def order_dispatch_radius(wait_requests, driver_table, dispatch_method='LD',meth
     :return: matched_pair_actual_indexs: order and driver pair, matched_itinerary: the itinerary of matched driver
     :rtype: tuple
     """
-    # TODO: Let assume "matching_radius" is store in self.driver_table as a column
+    #  "matching_radius" is store in self.driver_table as a column
     con_ready_to_dispatch = (driver_table['status'] == 0) | (driver_table['status'] == 4)
     idle_driver_table = driver_table[con_ready_to_dispatch]
     num_wait_request = wait_requests.shape[0]
     num_idle_driver = idle_driver_table.shape[0]
     matched_pair_actual_indexs = []
     matched_itinerary = []
-    # print("num of wait request:", num_wait_request)
-    # print("num idle driver:", num_idle_driver)
     if num_wait_request > 0 and num_idle_driver > 0:
         if dispatch_method == 'LD':
             # generate order driver pairs and corresponding itinerary
@@ -706,11 +706,16 @@ def order_dispatch_radius(wait_requests, driver_table, dispatch_method='LD',meth
             driver_loc_array_temp = idle_driver_table.loc[:, ['lng', 'lat', 'driver_id', 'matching_radius']]
             driver_loc_array = np.tile(driver_loc_array_temp.values, (num_wait_request, 1))
             dis_array = distance_array(request_array[:, :2], driver_loc_array[:, :2])
-            # TODO: compare the distance with matching radius for each idle driver
+            # TODO: compare the distance with matching radius for each idle driver 
             flag = np.where(dis_array <= driver_loc_array[:, 3])[0]
             if len(flag) > 0:
-                order_driver_pair = np.vstack(
-                    [request_array[flag, 2], driver_loc_array[flag, 2], request_array[flag, 3], dis_array[flag]]).T
+                if adjust_reward_by_radius:
+                    # adjust reward by radius
+                    order_driver_pair = np.vstack(
+                        [request_array[flag, 2], driver_loc_array[flag, 2], request_array[flag, 3] / driver_loc_array[flag, 3], dis_array[flag]]).T
+                else:
+                    order_driver_pair = np.vstack(
+                        [request_array[flag, 2], driver_loc_array[flag, 2], request_array[flag, 3], dis_array[flag]]).T
                 matched_pair_actual_indexs = LD(order_driver_pair.tolist())
                 request_indexs = np.array(matched_pair_actual_indexs)[:, 0]
                 driver_indexs = np.array(matched_pair_actual_indexs)[:, 1]

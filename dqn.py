@@ -66,7 +66,7 @@ class DqnAgent:
     """
 
     def __init__(self, action_space: list, num_layers: int, layers_dimension_list: list, lr=5e-4, gamma=0.99,
-                 epsilon=1.0, eps_min=0.01, eps_dec=0.9978, target_replace_iter=2000):
+                 epsilon=1.0, eps_min=0.01, eps_dec=0.9978, target_replace_iter=2000, mode="train", adjust_reward=0):
         self.num_actions = len(action_space)
         self.num_layers = num_layers
         self.layers_dimension_list = layers_dimension_list
@@ -89,15 +89,19 @@ class DqnAgent:
 
         # to plot the loss curve
         self.loss = 0
-   
-        # Create a SummaryWriter object and specify the log directory
         current_time = datetime.now().strftime('%b%d_%H-%M-%S')
-        log_dir = f"runs/experiment_dqn_{'_'.join(map(str, self.layers_dimension_list))}_{'_'.join(map(str, action_space))}_{current_time}"
-        self.writer = SummaryWriter(log_dir)
-        hparam_dict = {'lr': self.lr, 'gamma': self.gamma, 'epsilon': self.epsilon, 'eps_min': self.eps_min, 'eps_dec': self.eps_dec, 'target_replace_iter': self.target_replace_iter}
-        self.writer.add_hparams(hparam_dict, {})
-        self.writer.close()
-
+        if mode == "train":
+            # Create a SummaryWriter object and specify the log directory
+            train_log_dir = f"runs/train/experiment_dqn_{adjust_reward}_{current_time}"
+            self.train_writer = SummaryWriter(train_log_dir)
+            hparam_dict = {'lr': self.lr, 'gamma': self.gamma, 'epsilon': self.epsilon, 'eps_min': self.eps_min, 'eps_dec': self.eps_dec, 'target_replace_iter': self.target_replace_iter}
+            self.train_writer.add_hparams(hparam_dict, {})
+            self.train_writer.close()
+        elif mode == "test":
+            test_log_dir = f"runs/test/experiment_dqn_{adjust_reward}_{current_time}"
+            self.test_writer = SummaryWriter(test_log_dir)
+            self.test_writer.add_hparams(hparam_dict, {})
+            self.test_writer.close()
 
     def choose_action(self, states: np.array):
         """
@@ -156,15 +160,12 @@ class DqnAgent:
         
         # Log weights and biases
         for name, param in self.eval_net.named_parameters():
-            self.writer.add_histogram(name, param.clone().data.numpy(), self.eval_net_update_times)
+            self.train_writer.add_histogram(name, param.clone().data.numpy(), self.eval_net_update_times)
 
         # update epsilon
         self.epsilon = self.epsilon - self.eps_dec if self.epsilon > self.eps_min else self.eps_min
 
         self.eval_net_update_times += 1
-
-    
-
 
     def save_parameters(self, path: str):
         """
