@@ -51,8 +51,8 @@ class DqnNetwork(nn.Module):
         x = state
         for layer in self.layers:
             x = F.relu(layer(x))
-        actions = self.out(x)
-        return actions
+        q_value = self.out(x)
+        return q_value
 
 
 class DDqnAgent:
@@ -92,7 +92,7 @@ class DDqnAgent:
         current_time = datetime.now().strftime('%b%d_%H-%M-%S')
         if mode == "train":
             # Create a SummaryWriter object and specify the log directory
-            train_log_dir = f"runs/train/experiment_ddqn_{adjust_reward}_no_tb_{current_time}"
+            train_log_dir = f"runs/train/experiment_ddqn_{adjust_reward}_{current_time}"
             self.train_writer = SummaryWriter(train_log_dir)
             hparam_dict = {'lr': self.lr, 'gamma': self.gamma, 'epsilon': self.epsilon, 'eps_min': self.eps_min, 'eps_dec': self.eps_dec, 'target_replace_iter': self.target_replace_iter}
             self.train_writer.add_hparams(hparam_dict, {})
@@ -169,7 +169,11 @@ class DDqnAgent:
         Args:
         - path (str): The path to save the model parameters.
         """
-        torch.save(self.eval_net.state_dict(), path)
+        torch.save({
+            'eval_net': self.eval_net.state_dict(),
+            'target_net': self.target_net.state_dict()
+        }, path)
+
 
     def load_parameters(self, path: str):
         """
@@ -178,5 +182,6 @@ class DDqnAgent:
         Args:
         - path (str): The path to load the model parameters from.
         """
-        self.eval_net.load_state_dict(torch.load(path))
-        self.target_net.load_state_dict(torch.load(path))
+        checkpoint = torch.load(path)
+        self.eval_net.load_state_dict(checkpoint['eval_net'])
+        self.target_net.load_state_dict(checkpoint['target_net'])

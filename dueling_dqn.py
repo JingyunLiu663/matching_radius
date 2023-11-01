@@ -17,7 +17,7 @@ Attention:
 """
 
 
-class DqnNetwork(nn.Module):
+class DuelingDqnNetwork(nn.Module):
     def __init__(self, input_dims: int, num_layers: int, layers_dimension_list: list, n_actions: int, lr: float):
         """
         :param input_dims: presumably 2 (time_slice, grid_id)
@@ -26,7 +26,7 @@ class DqnNetwork(nn.Module):
         :param n_actions: the action space
         :param lr: learning rate
         """
-        super(DqnNetwork, self).__init__()
+        super(DuelingDqnNetwork, self).__init__()
         self.layers = nn.ModuleList()
 
         # input layer
@@ -36,8 +36,9 @@ class DqnNetwork(nn.Module):
         for i in range(1, num_layers):
             self.layers.append(nn.Linear(layers_dimension_list[i - 1], layers_dimension_list[i]))
 
-        # output layer
-        self.out = nn.Linear(layers_dimension_list[-1], n_actions)
+        # Seperate the final layer into a V(s) and A(s,a) stream
+        self.value_layer = nn.Linear(layers_dimension_list[-1], 1)
+        self.advantage_layer = nn.Linear(layers_dimension_list[-1], n_actions)
 
         self.optimizer = optim.Adam(self.parameters(), lr=lr)
         self.loss = nn.MSELoss()
@@ -51,11 +52,15 @@ class DqnNetwork(nn.Module):
         x = state
         for layer in self.layers:
             x = F.relu(layer(x))
-        q_value = self.out(x)
+        value = self.value_layer(x)
+        advantage = self.advantage_layer(x)
+
+        # Combine V and A into Q
+        q_value = value + advantage - advantage.mean(dim=1, keepdim=True)
         return q_value
 
 
-class DqnAgent:
+class DuelingDqnAgent:
     """
         TODO: action space [2.0, 2.5, 3.0, 3.5, 4.0, 4.5, 5.0, 5.5, 6.0]
         The is an agent for DQN learning for dispatch problem:
@@ -82,9 +87,9 @@ class DqnAgent:
         self.eval_net_update_times = 0
 
         # one network as the network to be evaluated, the other as the fixed target
-        self.eval_net = DqnNetwork(self.input_dims, self.num_layers, self.layers_dimension_list, self.num_actions,
+        self.eval_net = DuelingDqnNetwork(self.input_dims, self.num_layers, self.layers_dimension_list, self.num_actions,
                                    self.lr)
-        self.target_net = DqnNetwork(self.input_dims, self.num_layers, self.layers_dimension_list, self.num_actions,
+        self.target_net = DuelingDqnNetwork(self.input_dims, self.num_layers, self.layers_dimension_list, self.num_actions,
                                      self.lr)
 
         # to plot the loss curve
@@ -92,13 +97,13 @@ class DqnAgent:
         current_time = datetime.now().strftime('%b%d_%H-%M-%S')
         if mode == "train":
             # Create a SummaryWriter object and specify the log directory
-            train_log_dir = f"runs/train/experiment_dqn_{adjust_reward}_{current_time}"
+            train_log_dir = f"runs/train/experiment_duelingdqn_{adjust_reward}_{current_time}"
             self.train_writer = SummaryWriter(train_log_dir)
             hparam_dict = {'lr': self.lr, 'gamma': self.gamma, 'epsilon': self.epsilon, 'eps_min': self.eps_min, 'eps_dec': self.eps_dec, 'target_replace_iter': self.target_replace_iter}
             self.train_writer.add_hparams(hparam_dict, {})
             self.train_writer.close()
         elif mode == "test":
-            test_log_dir = f"runs/test/experiment_dqn_{adjust_reward}_{current_time}"
+            test_log_dir = f"runs/test/experiment_duelingdqn_{adjust_reward}_{current_time}"
             self.test_writer = SummaryWriter(test_log_dir)
             self.test_writer.add_hparams(hparam_dict, {})
             self.test_writer.close()

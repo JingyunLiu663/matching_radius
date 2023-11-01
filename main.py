@@ -12,6 +12,7 @@ import os
 from utilities import *
 from dqn import DqnAgent
 from ddqn import DDqnAgent
+from dueling_dqn import DuelingDqnAgent
 from a2c import A2CAgent
 import config
 from matplotlib import pyplot as plt
@@ -78,7 +79,10 @@ if __name__ == "__main__":
             agent = DDqnAgent(args.action_space, args.num_layers, args.dim_list, args.lr, args.gamma,
                                 args.epsilon, args.eps_min, args.eps_dec, 2000, args.experiment_mode, args.adjust_reward)
             print("double dqn agent is created")
-
+        elif args.rl_agent == "dueling_dqn":
+            agent = DuelingDqnAgent(args.action_space, args.num_layers, args.dim_list, args.lr, args.gamma,
+                                args.epsilon, args.eps_min, args.eps_dec, 2000, args.experiment_mode, args.adjust_reward)
+            print("dueling dqn agent is created")
         #  # use pre-trained model
         # if env_params['pre_trained']:
         #     agent.load_parameters(parameter_path)
@@ -119,8 +123,8 @@ if __name__ == "__main__":
                     states_array = np.hstack((time_slices, grid_ids)).astype(np.float32)
                     action_indices = agent.choose_action(states_array)
 
-                    # log the action indices distribution
-                    # agent.train_writer.add_histogram('action_indices_distribution', action_indices, agent.eval_net_update_times)
+                    #log the action indices distribution
+                    agent.train_writer.add_histogram('action_indices_distribution', action_indices, agent.eval_net_update_times)
 
                     # calculate matching radius for the idle drivers
                     action_space_array = np.array(args.action_space)
@@ -161,7 +165,7 @@ if __name__ == "__main__":
                 episode_waiting_time.append(simulator.waiting_time)
             
             # add scalar to TensorBoard
-            '''
+            
             agent.train_writer.add_scalar('epoch running time', np.mean(episode_time), epoch)
             agent.train_writer.add_scalar('epoch average loss', np.mean(epoch_loss), epoch)
             agent.train_writer.add_scalar('epoch total adjusted reward (per pickup distance)', np.mean(episode_adjusted_reward), epoch)
@@ -173,7 +177,7 @@ if __name__ == "__main__":
             agent.train_writer.add_scalar('matched occupancy rate - no pickup', np.mean(episode_occupancy_rate_no_pickup), epoch)
             agent.train_writer.add_scalar('pickup time', np.mean(episode_pickup_time), epoch)
             agent.train_writer.add_scalar('waiting time', np.mean(episode_waiting_time), epoch)
-            '''
+            
 
             # store in record dict  
             print(f"epoch: {epoch}")    
@@ -195,7 +199,7 @@ if __name__ == "__main__":
                 # save RL model parameters
                 parameter_path = (f"pre_trained/{args.rl_agent}/{args.rl_agent}_epoch{epoch}_{args.adjust_reward}_model.pth")
                 agent.save_parameters(parameter_path)
-
+                
                  # serialize the record
                 if simulator.adjust_reward_by_radius:
                     with open(f'training_record_{args.rl_agent}_adjusted_reward.pkl', 'wb') as f:
