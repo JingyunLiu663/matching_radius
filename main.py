@@ -11,6 +11,7 @@ warnings.filterwarnings("ignore")
 import os
 from utilities import *
 from dqn import DqnAgent
+from ddqn import DDqnAgent
 from a2c import A2CAgent
 import config
 from matplotlib import pyplot as plt
@@ -73,10 +74,10 @@ if __name__ == "__main__":
             agent = DqnAgent(args.action_space, args.num_layers, args.dim_list, args.lr, args.gamma,
                                 args.epsilon, args.eps_min, args.eps_dec, 2000, args.experiment_mode, args.adjust_reward)
             print("dqn agent is created")
-        elif args.rl_agent == "a2c":
-            agent = A2CAgent(policy_hidden_dim=128, value_hidden_dim=128, action_dim=len(args.action_space),
-                                learning_rate=args.lr)
-            print("a2c agent is created")
+        elif args.rl_agent == "ddqn":
+            agent = DDqnAgent(args.action_space, args.num_layers, args.dim_list, args.lr, args.gamma,
+                                args.epsilon, args.eps_min, args.eps_dec, 2000, args.experiment_mode, args.adjust_reward)
+            print("double dqn agent is created")
 
         #  # use pre-trained model
         # if env_params['pre_trained']:
@@ -119,7 +120,7 @@ if __name__ == "__main__":
                     action_indices = agent.choose_action(states_array)
 
                     # log the action indices distribution
-                    agent.train_writer.add_histogram('action_indices_distribution', action_indices, agent.eval_net_update_times)
+                    # agent.train_writer.add_histogram('action_indices_distribution', action_indices, agent.eval_net_update_times)
 
                     # calculate matching radius for the idle drivers
                     action_space_array = np.array(args.action_space)
@@ -136,6 +137,7 @@ if __name__ == "__main__":
                         states, action_indices, rewards, next_states= simulator.replay_buffer.sample(BATCH_SIZE)
                         agent.learn(states, action_indices, rewards, next_states)
                         # keep track of the loss per time step
+                        print(f"epoch: {epoch} date: {date} step: {step} loss: {agent.loss}")
                         epoch_loss.append(agent.loss)
                 end_time = time.time()
 
@@ -159,6 +161,7 @@ if __name__ == "__main__":
                 episode_waiting_time.append(simulator.waiting_time)
             
             # add scalar to TensorBoard
+            '''
             agent.train_writer.add_scalar('epoch running time', np.mean(episode_time), epoch)
             agent.train_writer.add_scalar('epoch average loss', np.mean(epoch_loss), epoch)
             agent.train_writer.add_scalar('epoch total adjusted reward (per pickup distance)', np.mean(episode_adjusted_reward), epoch)
@@ -170,8 +173,13 @@ if __name__ == "__main__":
             agent.train_writer.add_scalar('matched occupancy rate - no pickup', np.mean(episode_occupancy_rate_no_pickup), epoch)
             agent.train_writer.add_scalar('pickup time', np.mean(episode_pickup_time), epoch)
             agent.train_writer.add_scalar('waiting time', np.mean(episode_waiting_time), epoch)
+            '''
 
-            # store in record dict            
+            # store in record dict  
+            print(f"epoch: {epoch}")    
+            print(len(epoch_loss))   
+            print("1st element", epoch_loss[0])   
+            print("last element", epoch_loss[-1])   
             record_dict['epoch_average_loss'].append(np.mean(epoch_loss))
             record_dict['total_adjusted_reward'].append(np.mean(episode_adjusted_reward))
             record_dict['total_reward'].append(np.mean(episode_reward))
@@ -277,6 +285,7 @@ if __name__ == "__main__":
             print("ocu rate", occupancy_rate)
             
             # add scalar to TensorBoard
+            
             agent.test_writer.add_scalar('total reward', np.mean(total_reward), num)
             agent.test_writer.add_scalar('total adjusted reward', np.mean(total_adjusted_reward), num)
             agent.test_writer.add_scalar('total_request_num', np.mean(total_request_num), num)
@@ -332,7 +341,7 @@ if __name__ == "__main__":
             pickup_time = []
             waiting_time = []
 
-            for date in TRAIN_DATE_LIST:
+            for date in TEST_DATE_LIST:
                 simulator.experiment_date = date
                 simulator.reset()
                 start_time = time.time()
@@ -373,10 +382,10 @@ if __name__ == "__main__":
 
             # serialize the testing records
         if simulator.adjust_reward_by_radius:
-            with open(f'random_radius_adjusted_reward.pkl', 'wb') as f:
+            with open(f'fixed_radius_adjusted_reward_test.pkl', 'wb') as f:
                 pickle.dump(record_dict, f)
         else:
-            with open(f'random_radius_immediate_reward.pkl', 'wb') as f:
+            with open(f'fixed_radius_immediate_reward_test.pkl', 'wb') as f:
                 pickle.dump(record_dict, f)
     else:
         pass
