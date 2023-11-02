@@ -204,6 +204,10 @@ class Simulator:
         self.total_online_time = self.driver_table.shape[0] * (self.t_end - self.t_initial)
         self.waiting_time = 0
         self.pickup_time = 0
+        #JL
+        self.total_pickup_dist = 0
+        self.total_reward_per_pickup_dist = 0
+        # JL
 
         # self.matched_transferred_requests_num = 0
         self.matched_long_requests_num = 0
@@ -543,6 +547,8 @@ class Simulator:
                 self.wait_requests = pd.concat([self.wait_requests, wait_info], ignore_index=True)
 
                 # statistics
+                print("order generation")
+                print("wait_info", wait_info.shape[0])
                 self.total_request_num += wait_info.shape[0]
                 self.long_requests_num += wait_info[wait_info['trip_time'] >= 600].shape[0]
                 self.short_requests_num += wait_info[wait_info['trip_time'] <= 300].shape[0]
@@ -968,19 +974,20 @@ class Simulator:
         This function used to run the simulator step by step
         """
         # Step 1: order dispatching
-        start = time.time()
         wait_requests = deepcopy(self.wait_requests)
         driver_table = deepcopy(self.driver_table)
         matched_pair_actual_indexes, matched_itinerary = (
             order_dispatch_radius(wait_requests, driver_table, self.dispatch_method, self.method, self.adjust_reward_by_radius))
+        # matched_pair_actual_indexes, matched_itinerary = order_dispatch(wait_requests, driver_table,
+        #                                                                 self.maximal_pickup_distance,
+        #                                                               self.dispatch_method,self.method)
+        
         # Step 2: driver/passenger reaction after dispatching
         self.cumulative_on_trip_driver_num += self.driver_table[self.driver_table['status'] == 1].shape[0]
         self.cumulative_on_trip_driver_num += self.driver_table[self.driver_table['status'] == 2].shape[0]
         self.occupancy_rate = self.cumulative_on_trip_driver_num / (
                     (1 + self.current_step) * self.driver_table.shape[0])
-        end = time.time()
-        print("1.order dispatch: ", end - start)
-        start = time.time()
+        
         df_new_matched_requests, df_update_wait_requests = \
             self.update_info_after_matching_multi_process(matched_pair_actual_indexes, matched_itinerary)
         
@@ -1002,40 +1009,25 @@ class Simulator:
             self.total_reward_per_pickup_dist += 0
             
         self.matched_requests_num += len(df_new_matched_requests)
-        end = time.time()
-        print("2,update drivers & orders: ", end - start)
+        
         # Step 3: bootstrap new orders
-        start = time.time()
         self.order_generation()
-        end = time.time()
-        print("3.order generation: ", end - start)
 
         # Step 4: both-rg-cruising and/or repositioning decision
-        start = time.time()
         self.cruise_and_reposition()
-        end = time.time()
-        print("4. cruise and reposition: ", end - start)
 
         # Step 4.1: track recording
         if self.track_recording_flag:
             self.real_time_track_recording()
 
         # Step 5: update next state for drivers
-        start = time.time()
         self.update_state()
-        end = time.time()
-        print("5. update state: ", end - start)
 
         # Step 6： online/offline update()
-        start = time.time()
         self.driver_online_offline_update()
-        end = time.time()
-        print("6. offline decision: ", end - start)
+
         # Step 7: update time
-        start = time.time()
         self.update_time()
-        end = time.time()
-        print("7. update time: ", end - start)
 
 
     def rl_step(self, score_agent={}, epsilon=0): # rl for matching
