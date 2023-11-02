@@ -466,19 +466,20 @@ class Simulator:
             for time in range(min_time, self.time):
                 if time in self.request_databases.keys():
                     temp_request.extend(self.request_databases[time])
-            if self.time in self.request_databases.keys():
-                temp_request = self.request_databases[self.time]
             # temp_request = self.request_databases
             # TJ
             if temp_request == []:
                 return
+            
+            '''
             database_size = len(temp_request)
             # sample a portion of historical orders
             num_request = int(np.rint(self.order_sample_ratio * database_size))
             if num_request <= database_size:
                 sampled_request_index = np.random.choice(database_size, num_request, replace=False).tolist()
                 sampled_requests = [temp_request[index] for index in sampled_request_index]
-
+            '''
+            sampled_requests = temp_request
             # generate complete information for new orders
 
             column_name = ['order_id', 'origin_id', 'origin_lat', 'origin_lng', 'dest_id', 'dest_lat', 'dest_lng',
@@ -529,21 +530,6 @@ class Simulator:
                 wait_info['itinerary_segment_dis_list'] = itinerary_segment_dis_list
                 wait_info['weight'] = wait_info['designed_reward'] #wait_info['trip_distance'] * 5
               
-                # 添加分布  价格高的删除
-                wait_info['maximum_price_passenger_can_tolerate'] = np.random.normal(
-                    env_params['maximum_price_passenger_can_tolerate_mean'],
-                    env_params['maximum_price_passenger_can_tolerate_std'],
-                    len(wait_info))
-                wait_info = wait_info[
-                    wait_info['maximum_price_passenger_can_tolerate'] >= wait_info['trip_distance'] * env_params[
-                        'price_per_km']]
-                wait_info['maximum_pickup_time_passenger_can_tolerate'] = np.random.normal(
-                    env_params['maximum_pickup_time_passenger_can_tolerate_mean'],
-                    env_params['maximum_pickup_time_passenger_can_tolerate_std'],
-                    len(wait_info))
-
-                # wait_info = wait_info.drop(columns=['trip_distance'])
-                # wait_info = wait_info.drop(columns=['designed_reward'])
                 self.wait_requests = pd.concat([self.wait_requests, wait_info], ignore_index=True)
 
                 # statistics
