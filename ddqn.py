@@ -10,11 +10,12 @@ from datetime import datetime
 
 """
 This script is used for RL to learn the optimal matching radius
-DQN with replay buffer and fixed target is implemented
+Double DQN with replay buffer and fixed target is implemented
 Attention:
     State may be stored as a customized State object in other scripts, 
     but within this RL agent construct script, State is maintained in tuple format for memory efficiency consideration
 """
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
 class DqnNetwork(nn.Module):
@@ -79,13 +80,15 @@ class DDqnAgent:
         self.target_replace_iter = target_replace_iter  # how often do we update the target network
         self.batch_size = BATCH_SIZE
 
+        self.update = 0 # debug
+
         self.eval_net_update_times = 0
 
         # one network as the network to be evaluated, the other as the fixed target
         self.eval_net = DqnNetwork(self.input_dims, self.num_layers, self.layers_dimension_list, self.num_actions,
-                                   self.lr)
+                                   self.lr).to(device)
         self.target_net = DqnNetwork(self.input_dims, self.num_layers, self.layers_dimension_list, self.num_actions,
-                                     self.lr)
+                                     self.lr).to(device)
 
         # to plot the loss curve
         self.loss = 0
@@ -111,7 +114,7 @@ class DDqnAgent:
         """
         n = states.shape[0]
         # Convert all observations to a tensor
-        state_tensor = torch.tensor(states, dtype=torch.float32)
+        state_tensor = torch.tensor(states, dtype=torch.float32).to(device)
         # Compute Q-values for all states in one forward pass
         with torch.no_grad():
             q_values = self.eval_net(state_tensor)
@@ -128,13 +131,14 @@ class DDqnAgent:
 
         # update the target network parameter
         if self.eval_net_update_times % self.target_replace_iter == 0:
+            self.update += 1
             self.target_net.load_state_dict(self.eval_net.state_dict())
 
         # convert numpy array to tensor
-        state_batch = torch.tensor(states, dtype=torch.float32)
-        action_batch = torch.tensor(action_indices, dtype=torch.int64)
-        reward_batch = torch.tensor(rewards, dtype=torch.float32)
-        new_state_batch = torch.tensor(next_states, dtype=torch.float32)
+        state_batch = torch.tensor(states, dtype=torch.float32).to(device)
+        action_batch = torch.tensor(action_indices, dtype=torch.int64).to(device)
+        reward_batch = torch.tensor(rewards, dtype=torch.float32).to(device)
+        new_state_batch = torch.tensor(next_states, dtype=torch.float32).to(device)
 
         # RL learn by batch
         q_eval = self.eval_net(state_batch)[np.arange(BATCH_SIZE), action_batch]
@@ -185,3 +189,5 @@ class DDqnAgent:
         checkpoint = torch.load(path)
         self.eval_net.load_state_dict(checkpoint['eval_net'])
         self.target_net.load_state_dict(checkpoint['target_net'])
+        self.eval_net = self.eval_net.to(device)
+        self.target_net = self.target_net.to(device)
