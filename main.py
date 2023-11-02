@@ -317,8 +317,8 @@ if __name__ == "__main__":
             with open(f'testing_record_{args.rl_agents}_immediate_reward.pkl', 'wb') as f:
                 pickle.dump(record_dict, f)
 
-    elif simulator.rl_mode == "random":
-        print("random process:")
+    elif simulator.rl_mode == "fixed":
+        print("fixed process:")
         column_list = ['total_adjusted_reward', 'total_reward',
                'total_request_num', 'matched_request_num',
                'matched_request_ratio',
@@ -381,11 +381,9 @@ if __name__ == "__main__":
             record_dict['waiting_time'].append(np.mean(waiting_time))
 
             # serialize the testing records
-        if simulator.adjust_reward_by_radius:
-            with open(f'fixed_radius_adjusted_reward_test.pkl', 'wb') as f:
-                pickle.dump(record_dict, f)
-        else:
-            with open(f'fixed_radius_immediate_reward_test.pkl', 'wb') as f:
-                pickle.dump(record_dict, f)
+        
+        
+        with open(f'fixed_radius_1k_test.pkl', 'wb') as f:
+            pickle.dump(record_dict, f)
     else:
         pass
