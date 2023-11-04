@@ -468,15 +468,15 @@ class Simulator:
             if temp_request == []:
                 return
             
-            '''
+            
             database_size = len(temp_request)
             # sample a portion of historical orders
             num_request = int(np.rint(self.order_sample_ratio * database_size))
             if num_request <= database_size:
                 sampled_request_index = np.random.choice(database_size, num_request, replace=False).tolist()
                 sampled_requests = [temp_request[index] for index in sampled_request_index]
-            '''
-            sampled_requests = temp_request
+            
+            # sampled_requests = temp_request
             # generate complete information for new orders
 
             column_name = ['order_id', 'origin_id', 'origin_lat', 'origin_lng', 'dest_id', 'dest_lat', 'dest_lng',
@@ -563,7 +563,7 @@ class Simulator:
 
         # reposition decision
         # total_idle_time 为reposition间的间隔， time to last both-rg-cruising 为cruising间的间隔。
-        if self.reposition_flag and (self.rl_mode == 'matching' or self.rl_mode == 'matching_radius' or self.rl_mode == 'fixed'):
+        if self.reposition_flag and (self.rl_mode == 'matching' or self.rl_mode == 'matching_radius' or self.rl_mode == 'random'):
             con_eligibe = (self.driver_table['total_idle_time'] > self.eligible_time_for_reposition) & \
                           (self.driver_table['status'] == 0)
             eligible_driver_table = self.driver_table[con_eligibe]
@@ -586,7 +586,7 @@ class Simulator:
                 self.driver_table.loc[eligible_driver_index, 'target_loc_lat'] = lat_array
                 self.driver_table.loc[eligible_driver_index, 'target_grid_id'] = grid_id_array
         if self.cruise_flag:
-            if self.rl_mode == 'matching' or self.rl_mode == 'matching_radius' or self.rl_mode == 'fixed':
+            if self.rl_mode == 'matching' or self.rl_mode == 'matching_radius' or self.rl_mode == 'random':
                 con_eligibe = (self.driver_table['time_to_last_cruising'] >= self.max_idle_time) & \
                             (self.driver_table['status'] == 0)
             elif self.rl_mode == 'reposition':
@@ -620,7 +620,7 @@ class Simulator:
                 state_array = np.vstack(
                     [self.time + self.delta_t - self.max_idle_time + np.zeros(grid_id_array.shape[0]),
                      grid_id_array]).T
-                if self.rl_mode == 'matching' or self.rl_mode == 'matching_radius' or self.rl_mode == 'fixed':
+                if self.rl_mode == 'matching' or self.rl_mode == 'matching_radius' or self.rl_mode == 'random':
                     remaining_time_array = self.driver_table.loc[eligible_driver_index, 'remaining_time'].values
                 elif self.rl_mode == 'reposition':
                     remaining_time_array = self.driver_table.loc[eligible_driver_index, 'remaining_time'].map(
@@ -792,7 +792,7 @@ class Simulator:
         self.driver_table['current_road_node_index'] = self.driver_table['current_road_node_index'].values.astype(int)
 
         loc_cruise = self.driver_table['status'] == 0
-        if self.rl_mode == 'matching' or self.rl_mode == 'matching_radius' or self.rl_mode == 'fixed':
+        if self.rl_mode == 'matching' or self.rl_mode == 'matching_radius' or self.rl_mode == 'random':
             loc_actually_cruising = loc_cruise & (self.driver_table['remaining_time'] > 0)
         elif self.rl_mode == 'reposition':
             loc_reposition = self.driver_table['status'] == 4
@@ -820,7 +820,7 @@ class Simulator:
 
         # for unfinished tasks
         self.driver_table.loc[loc_cruise, 'total_idle_time'] += self.delta_t
-        if self.rl_mode == 'matching'or self.rl_mode == 'matching_radius' or self.rl_mode == 'fixed':
+        if self.rl_mode == 'matching'or self.rl_mode == 'matching_radius' or self.rl_mode == 'random':
             con_real_time_ongoing = loc_unfinished & (loc_cruise | loc_reposition | loc_delivery) | loc_pickup 
         elif self.rl_mode == 'reposition':
             con_real_time_ongoing = loc_unfinished & (loc_cruise | loc_reposition) | loc_pickup
@@ -961,11 +961,13 @@ class Simulator:
         # Step 1: order dispatching
         wait_requests = deepcopy(self.wait_requests)
         driver_table = deepcopy(self.driver_table)
+      
         matched_pair_actual_indexes, matched_itinerary = (
             order_dispatch_radius(wait_requests, driver_table, self.dispatch_method, self.method, self.adjust_reward_by_radius))
+        
         # matched_pair_actual_indexes, matched_itinerary = order_dispatch(wait_requests, driver_table,
-        #                                                                 self.maximal_pickup_distance,
-        #                                                               self.dispatch_method,self.method)
+        #                                                             self.maximal_pickup_distance,
+        #                                                           self.dispatch_method,self.method)
         
         # Step 2: driver/passenger reaction after dispatching
         self.cumulative_on_trip_driver_num += self.driver_table[self.driver_table['status'] == 1].shape[0]

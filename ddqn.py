@@ -80,7 +80,7 @@ class DDqnAgent:
         self.target_replace_iter = target_replace_iter  # how often do we update the target network
         self.batch_size = BATCH_SIZE
 
-        self.update = 0 # debug
+        self.mode = mode
 
         self.eval_net_update_times = 0
 
@@ -93,18 +93,16 @@ class DDqnAgent:
         # to plot the loss curve
         self.loss = 0
         current_time = datetime.now().strftime('%b%d_%H-%M-%S')
-        if mode == "train":
+        if self.mode == "train":
             # Create a SummaryWriter object and specify the log directory
             train_log_dir = f"runs/train/experiment_ddqn_{adjust_reward}_{current_time}"
             self.train_writer = SummaryWriter(train_log_dir)
             hparam_dict = {'lr': self.lr, 'gamma': self.gamma, 'epsilon': self.epsilon, 'eps_min': self.eps_min, 'eps_dec': self.eps_dec, 'target_replace_iter': self.target_replace_iter}
             self.train_writer.add_hparams(hparam_dict, {})
             self.train_writer.close()
-        elif mode == "test":
+        elif self.mode == "test":
             test_log_dir = f"runs/test/experiment_ddqn_{adjust_reward}_{current_time}"
             self.test_writer = SummaryWriter(test_log_dir)
-            self.test_writer.add_hparams(hparam_dict, {})
-            self.test_writer.close()
 
     def choose_action(self, states: np.array):
         """
@@ -119,12 +117,13 @@ class DDqnAgent:
         with torch.no_grad():
             q_values = self.eval_net(state_tensor)
         # Default action selection is greedy
-        action_indices = torch.argmax(q_values, dim=1).numpy()
-        # Identify agents that should explore
-        explorers = np.random.random(n) < self.epsilon
-        # Generate random actions for explorers
-        action_indices[explorers] = np.random.randint(self.num_actions, size=np.sum(explorers))
-
+        action_indices = torch.argmax(q_values, dim=1).cpu().numpy()
+        if self.mode == "train":
+            # Identify agents that should explorde
+            explorers = np.random.random(n) < self.epsilon
+            # Generate random actions for explorers
+            action_indices[explorers] = np.random.randint(self.num_actions, size=np.sum(explorers))
+        
         return action_indices
 
     def learn(self, states, action_indices, rewards, next_states):

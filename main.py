@@ -6,6 +6,7 @@ from path import *
 import time
 from tqdm import tqdm
 import warnings
+import torch
 
 warnings.filterwarnings("ignore")
 import os
@@ -13,12 +14,9 @@ from utilities import *
 from dqn import DqnAgent
 from ddqn import DDqnAgent
 from dueling_dqn import DuelingDqnAgent
-from a2c import A2CAgent
 import config
 from matplotlib import pyplot as plt
 import argparse
-import optuna
-from optuna.integration import TensorBoardCallback
 
 
 def get_args():
@@ -50,6 +48,8 @@ def get_args():
 
 
 if __name__ == "__main__":
+    if torch.cuda.is_available():
+        print("GPU is available")
     # get command line arguments
     args = get_args()
     print("action space:", args.action_space) 
@@ -83,10 +83,11 @@ if __name__ == "__main__":
             agent = DuelingDqnAgent(args.action_space, args.num_layers, args.dim_list, args.lr, args.gamma,
                                 args.epsilon, args.eps_min, args.eps_dec, 2000, args.experiment_mode, args.adjust_reward)
             print("dueling dqn agent is created")
-        #  # use pre-trained model
-        # if env_params['pre_trained']:
-        #     agent.load_parameters(parameter_path)
-        #     print("pre-trained model is loaded")
+         # use pre-trained model
+        parameter_path = (f"pre_trained/{args.rl_agent}/{args.rl_agent}_epoch90_{args.adjust_reward}_model.pth")
+        if env_params['pre_trained']:
+            agent.load_parameters(parameter_path)
+            print("pre-trained model is loaded")
 
         for epoch in range(NUM_EPOCH):
             # each epoch walks through 5 weekdays in a row
@@ -165,10 +166,10 @@ if __name__ == "__main__":
             
             # add scalar to TensorBoard
             
-            agent.train_writer.add_scalar('epoch running time', np.mean(episode_time), epoch)
-            agent.train_writer.add_scalar('epoch average loss', np.mean(epoch_loss), epoch)
-            agent.train_writer.add_scalar('epoch total adjusted reward (per pickup distance)', sum(episode_adjusted_reward), epoch)
-            agent.train_writer.add_scalar('epoch total reward', sum(episode_reward), epoch)
+            agent.train_writer.add_scalar('running time', np.mean(episode_time), epoch)
+            agent.train_writer.add_scalar('average loss', np.mean(epoch_loss), epoch)
+            agent.train_writer.add_scalar('total adjusted reward (per pickup distance)', sum(episode_adjusted_reward), epoch)
+            agent.train_writer.add_scalar('total reward', sum(episode_reward), epoch)
             agent.train_writer.add_scalar('total orders', sum(episode_total_request_num), epoch)
             agent.train_writer.add_scalar('matched orders', sum(episode_matched_requests_num), epoch)
             agent.train_writer.add_scalar('matched request ratio', sum(episode_matched_requests_num)/ sum(episode_total_request_num), epoch)
@@ -176,7 +177,6 @@ if __name__ == "__main__":
             agent.train_writer.add_scalar('matched occupancy rate - no pickup', np.mean(episode_occupancy_rate_no_pickup), epoch)
             agent.train_writer.add_scalar('pickup time', np.mean(episode_pickup_time), epoch)
             agent.train_writer.add_scalar('waiting time', np.mean(episode_waiting_time), epoch)
-            agent.train_writer.add_scalar('target netwrok update times', agent.update, epoch)
             
 
             # store in record dict  
@@ -191,18 +191,27 @@ if __name__ == "__main__":
             record_dict['pickup_time'].append(np.mean(episode_pickup_time))
             record_dict['waiting_time'].append(np.mean(episode_waiting_time))
 
-            if epoch % 10 == 0:
+            if epoch % 50 == 0:
                 # save RL model parameters
-                parameter_path = (f"pre_trained/{args.rl_agent}/{args.rl_agent}_epoch{epoch}_{args.adjust_reward}_model.pth")
+                parameter_path = (f"pre_trained/{args.rl_agent}/{args.rl_agent}_epoch{epoch}_{args.adjust_reward}_sample50_model.pth")
                 agent.save_parameters(parameter_path)
                 
                  # serialize the record
                 if simulator.adjust_reward_by_radius:
-                    with open(f'training_record_{args.rl_agent}_adjusted_reward.pkl', 'wb') as f:
+                    with open(f'training_record_{args.rl_agent}_adjusted_reward_sample50.pkl', 'wb') as f:
                         pickle.dump(record_dict, f)
                 else:
-                    with open(f'training_record_{args.rl_agent}_immediate_reward.pkl', 'wb') as f:
+                    with open(f'training_record_{args.rl_agent}_immediate_reward_sample50.pkl', 'wb') as f:
                         pickle.dump(record_dict, f)
+                        
+        parameter_path = (f"pre_trained/{args.rl_agent}/{args.rl_agent}_epoch100_{args.adjust_reward}_sample50_model.pth")
+        agent.save_parameters(parameter_path)
+        if simulator.adjust_reward_by_radius:
+            with open(f'training_record_{args.rl_agent}_adjusted_reward_sample50.pkl', 'wb') as f:
+                pickle.dump(record_dict, f)
+        else:
+            with open(f'training_record_{args.rl_agent}_immediate_reward_sample50.pkl', 'wb') as f:
+                pickle.dump(record_dict, f)
         # close TensorBoard writer
         agent.train_writer.close()
        
@@ -217,19 +226,30 @@ if __name__ == "__main__":
         
         record_dict = {col: [] for col in column_list}
 
+        if args.rl_agent == "dqn":
+                agent = DqnAgent(args.action_space, args.num_layers, args.dim_list, args.lr, args.gamma,
+                                args.epsilon, args.eps_min, args.eps_dec, 2000, "test")
+                parameter_path = (f"pre_trained/{args.rl_agent}/"
+                                f"{args.rl_agent}_epoch90_{args.adjust_reward}_model.pth")
+                print("dqn agent is created")
+        elif args.rl_agent == "ddqn":
+            agent = DDqnAgent(args.action_space, args.num_layers, args.dim_list, args.lr, args.gamma,
+                            args.epsilon, args.eps_min, args.eps_dec, 2000, "test")
+            parameter_path = (f"pre_trained/{args.rl_agent}/"
+                            f"{args.rl_agent}_epoch90_{args.adjust_reward}_model.pth")
+            print("double dqn agent is created")
+        elif args.rl_agent == "dueling_dqn":
+            agent = DuelingDqnAgent(args.action_space, args.num_layers, args.dim_list, args.lr, args.gamma,
+                            args.epsilon, args.eps_min, args.eps_dec, 2000, "test")
+            parameter_path = (f"pre_trained/{args.rl_agent}/"
+                            f"{args.rl_agent}_epoch90_{args.adjust_reward}_model.pth")
+            print("dueling dqn agent is created")
+        agent.load_parameters(parameter_path)
+        print("RL agent parameter loaded")
+
         test_num = 10
-      
         for num in range(test_num):
             print('num: ', num)
-            if args.rl_agent == "dqn":
-                agent = DqnAgent(args.action_space, args.num_layers, args.dim_list, args.lr, args.gamma,
-                                args.epsilon, args.eps_min, args.eps_dec)
-                parameter_path = (f"pre_trained/{args.rl_agent}/"
-                                f"{args.rl_agent}_{'_'.join(map(str, args.dim_list))}_model.pth")
-                print("dqn agent is created")
-            agent.load_parameters(parameter_path)
-            print("RL agent parameter loaded")
-
             total_adjusted_reward = []
             total_reward = []
             total_request_num = []
@@ -252,9 +272,6 @@ if __name__ == "__main__":
                     # Determine the action_indices for the idle drivers
                     states_array = np.hstack((time_slices, grid_ids)).astype(np.float32)
                     action_indices = agent.choose_action(states_array)
-
-                    # Log the action indices distribution
-                    # agent.writer.add_histogram('action_indices_distribution', action_indices, agent.eval_net_update_times)
 
                     # Calculate matching radius for the idle drivers
                     action_space_array = np.array(args.action_space)
@@ -287,14 +304,14 @@ if __name__ == "__main__":
             # add scalar to TensorBoard
             
             agent.test_writer.add_scalar('total reward', sum(total_reward), num)
-            agent.test_writer.add_scalar('total adjusted reward', sum(total_adjusted_reward), num)
-            agent.test_writer.add_scalar('total_request_num', sum(total_request_num), num)
-            agent.test_writer.add_scalar('matched_request_num', sum(matched_request_num), num)
-            agent.test_writer.add_scalar('matched_request_ratio', sum(matched_request_num)/ sum(total_request_num), num)
-            agent.test_writer.add_scalar('occupancy_rate', np.mean(occupancy_rate), num)
-            agent.test_writer.add_scalar('occupancy_rate_no_pickup', np.mean(occupancy_rate_no_pickup), num)
-            agent.test_writer.add_scalar('pickup_time', np.mean(pickup_time), num)
-            agent.test_writer.add_scalar('waiting_time', np.mean(waiting_time), num)
+            agent.test_writer.add_scalar('total adjusted reward (per pickup distance)', sum(total_adjusted_reward), num)
+            agent.test_writer.add_scalar('total orders', sum(total_request_num), num)
+            agent.test_writer.add_scalar('matched orders', sum(matched_request_num), num)
+            agent.test_writer.add_scalar('matched request ratio', sum(matched_request_num)/ sum(total_request_num), num)
+            agent.test_writer.add_scalar('matched occupancy rate', np.mean(occupancy_rate), num)
+            agent.test_writer.add_scalar('matched occupancy rate - no pickup', np.mean(occupancy_rate_no_pickup), num)
+            agent.test_writer.add_scalar('pickup time', np.mean(pickup_time), num)
+            agent.test_writer.add_scalar('waiting time', np.mean(waiting_time), num)
             
             # Add scalar to TensorBoard and store in record_dict
             record_dict['total_reward'].append(sum(total_reward))
@@ -317,8 +334,8 @@ if __name__ == "__main__":
             with open(f'testing_record_{args.rl_agents}_immediate_reward.pkl', 'wb') as f:
                 pickle.dump(record_dict, f)
 
-    elif simulator.rl_mode == "fixed":
-        print("fixed process:")
+    elif simulator.rl_mode == "random":
+        print("random process:")
         column_list = ['total_adjusted_reward', 'total_reward',
                'total_request_num', 'matched_request_num',
                'matched_request_ratio',
@@ -383,7 +400,5 @@ if __name__ == "__main__":
             # serialize the testing records
         
         
-        with open(f'fixed_radius_1k_test.pkl', 'wb') as f:
+        with open(f'random_radius_test.pkl', 'wb') as f:
             pickle.dump(record_dict, f)
-    else:
-        pass
