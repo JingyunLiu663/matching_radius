@@ -4,7 +4,7 @@ env_params = {
     'delta_t' : 5,  # s
     'vehicle_speed' : 22.788,   # km / h
     'repo_speed' : 1, #目前的设定需要与vehicl speed保持一致
-    'order_sample_ratio' : 1,
+    'order_sample_ratio' : 1, 
     'order_generation_mode' : 'sample_from_base',
     'driver_sample_ratio' : 1,
     'maximum_wait_time_mean' : 300,
@@ -30,7 +30,6 @@ env_params = {
     'driver_file_name' : 'input/driver_info',
     'road_network_file_name' : 'road_network_information.pickle',
     'dispatch_method': 'LD', #LD: lagarange decomposition method designed by Peibo Duan
-    # 'method': 'instant_reward_no_subway',
     'simulator_mode' : 'toy_mode',
     'experiment_mode' : 'train',
     'driver_num':500,
@@ -42,18 +41,18 @@ env_params = {
     'south_lat': 40.6968,
     'east_lng': -74.0831,
     'west_lng': -73.8414,
-    'rl_mode': 'matching_radius',  # ['reposition', 'matching', 'matching_radius']
+    'rl_mode': 'matching_radius',  # ['reposition','matching_radius', 'random', 'fixed', 'greedy_radius']
     'method': 'sarsa_no_subway',  #  'sarsa_no_subway' / 'pickup_distance' / 'instant_reward_no_subway'   #  rl for matching
     'reposition_method': 'A2C_global_aware',  # A2C, A2C_global_aware, random_cruise, stay  # rl for repositioning
     'dayparting': False, # if true, simulator_env will compute information based on time periods in a day, e.g. 'morning', 'afternoon'
-    'pre_trained': False, # load pre-trained parameters
+    'pre_trained': False, # load pre-trained parameters #TODO
 }
 
 # rl for matching radius
-NUM_EPOCH = 100
+NUM_EPOCH = 120
 BATCH_SIZE = 128  # 128/256
 # TRAIN_DATE_LIST = ['2015-05-04', '2015-05-05', '2015-05-06', '2015-05-07', '2015-05-08', '2015-05-11', '2015-05-12',
 #                    '2015-05-13', '2015-05-14', '2015-05-15', '2015-05-18']
-TRAIN_DATE_LIST = ['2015-05-04', '2015-05-05', '2015-05-06', '2015-05-07', '2015-05-08']
-TEST_DATE_LIST = ['2015-05-11', '2015-05-12', '2015-05-13', '2015-05-14', '2015-05-15']
+TRAIN_DATE_LIST = ['2015-05-04']#, '2015-05-05', '2015-05-06', '2015-05-07', '2015-05-08']
+TEST_DATE_LIST = ['2015-05-11']#, '2015-05-12', '2015-05-13', '2015-05-14', '2015-05-15']
 # rl for matching radius

@@ -17,14 +17,16 @@ from dueling_dqn import DuelingDqnAgent
 import config
 from matplotlib import pyplot as plt
 import argparse
+import cProfile
+import pstats
 
 
 def get_args():
     parser = argparse.ArgumentParser()
 
-    parser.add_argument('-rl_agent', type=str, default="dqn", help='RL agent') # "dqn" "a2c"
+    parser.add_argument('-rl_agent', type=str, default="dqn", help='RL agent') 
     parser.add_argument('-action_space', type=float, nargs='+',
-                        default=[0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0, 2.25, 2.5, 2.75, 3.0],
+                        default=[1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 4.5, 5.0],
                         help='action space - list of matching radius')
     parser.add_argument('-num_layers', type=int, default=2, help='Number of fully connected layers')
     parser.add_argument('-dim_list', type=int, nargs='+', default=[128, 128],
@@ -36,6 +38,7 @@ def get_args():
     parser.add_argument('-epsilon', type=float, default=1.0, help='epsilon greedy - begin epsilon')
     parser.add_argument('-eps_min', type=float, default=0.01, help='epsilon greedy - end epsilon')
     parser.add_argument('-eps_dec', type=float, default=0.9978, help='epsilon greedy - epsilon decay per step')
+    parser.add_argument('-target_update', type=int, default=2000, help='update frequency for target network')
 
     # 0: False 1:True
     parser.add_argument('-adjust_reward', type=int, default=0, 
@@ -73,22 +76,24 @@ if __name__ == "__main__":
         # initialize the RL agent for matching radius 
         if args.rl_agent == "dqn":
             agent = DqnAgent(args.action_space, args.num_layers, args.dim_list, args.lr, args.gamma,
-                                args.epsilon, args.eps_min, args.eps_dec, 2000, args.experiment_mode, args.adjust_reward)
+                                args.epsilon, args.eps_min, args.eps_dec, args.target_update, args.experiment_mode, args.adjust_reward)
             print("dqn agent is created")
         elif args.rl_agent == "ddqn":
             agent = DDqnAgent(args.action_space, args.num_layers, args.dim_list, args.lr, args.gamma,
-                                args.epsilon, args.eps_min, args.eps_dec, 2000, args.experiment_mode, args.adjust_reward)
+                                args.epsilon, args.eps_min, args.eps_dec, args.target_update, args.experiment_mode, args.adjust_reward)
             print("double dqn agent is created")
         elif args.rl_agent == "dueling_dqn":
             agent = DuelingDqnAgent(args.action_space, args.num_layers, args.dim_list, args.lr, args.gamma,
-                                args.epsilon, args.eps_min, args.eps_dec, 2000, args.experiment_mode, args.adjust_reward)
+                                args.epsilon, args.eps_min, args.eps_dec, args.target_update, args.experiment_mode, args.adjust_reward)
             print("dueling dqn agent is created")
-         # use pre-trained model
-        parameter_path = (f"pre_trained/{args.rl_agent}/{args.rl_agent}_epoch90_{args.adjust_reward}_model.pth")
+
+        # save and load pre-trained model
+        parameter_path = (f"pre_trained/{args.rl_agent}/{args.rl_agent}_epoch119_{args.adjust_reward}_model.pth")
         if env_params['pre_trained']:
             agent.load_parameters(parameter_path)
             print("pre-trained model is loaded")
 
+  
         for epoch in range(NUM_EPOCH):
             # each epoch walks through 5 weekdays in a row
             episode_time = []
@@ -191,30 +196,22 @@ if __name__ == "__main__":
             record_dict['pickup_time'].append(np.mean(episode_pickup_time))
             record_dict['waiting_time'].append(np.mean(episode_waiting_time))
 
-            if epoch % 50 == 0:
+            if (epoch > 95 and epoch % 10 == 0) or epoch == NUM_EPOCH - 1:
                 # save RL model parameters
-                parameter_path = (f"pre_trained/{args.rl_agent}/{args.rl_agent}_epoch{epoch}_{args.adjust_reward}_sample50_model.pth")
+                parameter_path = (f"pre_trained/{args.rl_agent}/{args.rl_agent}_epoch{epoch}_{args.adjust_reward}_target100_model.pth")
                 agent.save_parameters(parameter_path)
                 
-                 # serialize the record
-                if simulator.adjust_reward_by_radius:
-                    with open(f'training_record_{args.rl_agent}_adjusted_reward_sample50.pkl', 'wb') as f:
-                        pickle.dump(record_dict, f)
-                else:
-                    with open(f'training_record_{args.rl_agent}_immediate_reward_sample50.pkl', 'wb') as f:
-                        pickle.dump(record_dict, f)
-                        
-        parameter_path = (f"pre_trained/{args.rl_agent}/{args.rl_agent}_epoch100_{args.adjust_reward}_sample50_model.pth")
-        agent.save_parameters(parameter_path)
+        # serialize the record
         if simulator.adjust_reward_by_radius:
-            with open(f'training_record_{args.rl_agent}_adjusted_reward_sample50.pkl', 'wb') as f:
+            with open(f'training_record_{args.rl_agent}_adjusted_reward_testing.pkl', 'wb') as f:
                 pickle.dump(record_dict, f)
         else:
-            with open(f'training_record_{args.rl_agent}_immediate_reward_sample50.pkl', 'wb') as f:
+            with open(f'training_record_{args.rl_agent}_immediate_reward_testing.pkl', 'wb') as f:
                 pickle.dump(record_dict, f)
+                    
         # close TensorBoard writer
         agent.train_writer.close()
-       
+
 
     elif simulator.experiment_mode == 'test' and simulator.rl_mode == "matching_radius":
         print("testing process:")
@@ -228,22 +225,19 @@ if __name__ == "__main__":
 
         if args.rl_agent == "dqn":
                 agent = DqnAgent(args.action_space, args.num_layers, args.dim_list, args.lr, args.gamma,
-                                args.epsilon, args.eps_min, args.eps_dec, 2000, "test")
-                parameter_path = (f"pre_trained/{args.rl_agent}/"
-                                f"{args.rl_agent}_epoch90_{args.adjust_reward}_model.pth")
+                                args.epsilon, args.eps_min, args.eps_dec, args.target_update, args.experiment_mode, args.adjust_reward)
                 print("dqn agent is created")
         elif args.rl_agent == "ddqn":
             agent = DDqnAgent(args.action_space, args.num_layers, args.dim_list, args.lr, args.gamma,
-                            args.epsilon, args.eps_min, args.eps_dec, 2000, "test")
-            parameter_path = (f"pre_trained/{args.rl_agent}/"
-                            f"{args.rl_agent}_epoch90_{args.adjust_reward}_model.pth")
+                            args.epsilon, args.eps_min, args.eps_dec, args.target_update, args.experiment_mode, args.adjust_reward)
             print("double dqn agent is created")
         elif args.rl_agent == "dueling_dqn":
             agent = DuelingDqnAgent(args.action_space, args.num_layers, args.dim_list, args.lr, args.gamma,
-                            args.epsilon, args.eps_min, args.eps_dec, 2000, "test")
-            parameter_path = (f"pre_trained/{args.rl_agent}/"
-                            f"{args.rl_agent}_epoch90_{args.adjust_reward}_model.pth")
+                            args.epsilon, args.eps_min, args.eps_dec, args.target_update, args.experiment_mode, args.adjust_reward)
             print("dueling dqn agent is created")
+
+        parameter_path = (f"pre_trained/monday_small_radius/{args.rl_agent}/"
+                            f"{args.rl_agent}_epoch119_{args.adjust_reward}_model.pth")
         agent.load_parameters(parameter_path)
         print("RL agent parameter loaded")
 
@@ -262,7 +256,6 @@ if __name__ == "__main__":
             for date in TEST_DATE_LIST:
                 simulator.experiment_date = date
                 simulator.reset()
-                start_time = time.time()
                 for step in range(simulator.finish_run_step):
                     # Get the boolean mask for idle drivers
                     is_idle = (simulator.driver_table['status'] == 0) | (simulator.driver_table['status'] == 4)
@@ -283,7 +276,6 @@ if __name__ == "__main__":
 
                     # observe the transition and store the transition in the replay buffer (simulator.dispatch_transitions_buffer)
                     simulator.step()
-                end_time = time.time()
 
                 total_reward.append(simulator.total_reward)
                 total_adjusted_reward.append(simulator.total_reward_per_pickup_dist)
@@ -294,12 +286,12 @@ if __name__ == "__main__":
                 pickup_time.append(simulator.pickup_time / simulator.matched_requests_num)
                 waiting_time.append(simulator.waiting_time / simulator.matched_requests_num)
             
-            print("total reward",np.mean(total_reward))
-            print("total adjusted reeward", np.mean(total_adjusted_reward))
-            print("pick",np.mean(pickup_time))
+            print("total reward", sum(total_reward))
+            print("total adjusted reeward", sum(total_adjusted_reward))
+            print("pick", np.mean(pickup_time))
             print("wait", np.mean(waiting_time))
             print("matching ratio", sum(matched_request_num)/ sum(total_request_num))
-            print("ocu rate", occupancy_rate)
+            print("ocu rate", np.mean(occupancy_rate))
             
             # add scalar to TensorBoard
             
@@ -328,10 +320,10 @@ if __name__ == "__main__":
         agent.test_writer.close()
         # serialize the testing records
         if simulator.adjust_reward_by_radius:
-            with open(f'testing_record_{args.rl_agents}_adjusted_reward.pkl', 'wb') as f:
+            with open(f'testing_record_{args.rl_agent}_adjusted_reward.pkl', 'wb') as f:
                 pickle.dump(record_dict, f)
         else:
-            with open(f'testing_record_{args.rl_agents}_immediate_reward.pkl', 'wb') as f:
+            with open(f'testing_record_{args.rl_agent}_immediate_reward.pkl', 'wb') as f:
                 pickle.dump(record_dict, f)
 
     elif simulator.rl_mode == "random":
@@ -345,7 +337,6 @@ if __name__ == "__main__":
         record_dict = {col: [] for col in column_list}
 
         test_num = 10
-      
         for num in range(test_num):
             print('num: ', num)
 
@@ -365,7 +356,9 @@ if __name__ == "__main__":
                 for step in range(simulator.finish_run_step):
                     # Get the boolean mask for idle drivers
                     is_idle = (simulator.driver_table['status'] == 0) | (simulator.driver_table['status'] == 4)
-                    simulator.driver_table.loc[is_idle, 'matching_radius'] = np.random.choice(args.action_space, np.sum(is_idle))
+                    actions = np.random.choice(args.action_space, np.sum(is_idle))
+                    simulator.driver_table.loc[is_idle, 'matching_radius'] = actions
+                    
                     # observe the transition and store the transition in the replay buffer (simulator.dispatch_transitions_buffer)
                     simulator.step()
                 end_time = time.time()
@@ -386,19 +379,71 @@ if __name__ == "__main__":
             print("matching ratio", sum(matched_request_num)/ sum(total_request_num))
             print("ocu rate", occupancy_rate)
             
-            # Add scalar to TensorBoard and store in record_dict
-            record_dict['total_reward'].append(sum(total_reward))
-            record_dict['total_adjusted_reward'].append(sum(total_adjusted_reward))
-            record_dict['total_request_num'].append(sum(total_request_num))
-            record_dict['matched_request_num'].append(sum(matched_request_num))
-            record_dict['matched_request_ratio'].append(sum(matched_request_num) / sum(total_request_num))
-            record_dict['occupancy_rate'].append(np.mean(occupancy_rate))
-            record_dict['occupancy_rate_no_pickup'].append(np.mean(occupancy_rate_no_pickup))
-            record_dict['pickup_time'].append(np.mean(pickup_time))
-            record_dict['waiting_time'].append(np.mean(waiting_time))
+            # # Add scalar to TensorBoard and store in record_dict
+            # record_dict['total_reward'].append(sum(total_reward))
+            # record_dict['total_adjusted_reward'].append(sum(total_adjusted_reward))
+            # record_dict['total_request_num'].append(sum(total_request_num))
+            # record_dict['matched_request_num'].append(sum(matched_request_num))
+            # record_dict['matched_request_ratio'].append(sum(matched_request_num) / sum(total_request_num))
+            # record_dict['occupancy_rate'].append(np.mean(occupancy_rate))
+            # record_dict['occupancy_rate_no_pickup'].append(np.mean(occupancy_rate_no_pickup))
+            # record_dict['pickup_time'].append(np.mean(pickup_time))
+            # record_dict['waiting_time'].append(np.mean(waiting_time))
 
             # serialize the testing records
         
-        
-        with open(f'random_radius_test.pkl', 'wb') as f:
+        # with open('action_array_log.pkl', 'wb') as f:
+        #     pickle.dump(simulator.random_action_collection, f)
+        with open(f'random_radius_train.pkl', 'wb') as f:
             pickle.dump(record_dict, f)
+    elif simulator.rl_mode == "greedy_radius":
+        print("greedy radius process:")
+        column_list = ['total_adjusted_reward', 'total_reward',
+            'total_request_num', 'matched_request_num',
+            'matched_request_ratio',
+            'waiting_time', 'pickup_time',
+            'occupancy_rate','occupancy_rate_no_pickup']
+        
+        record_dict = {col: [] for col in column_list}
+
+        test_num = 10
+        for num in range(test_num):
+            print('num: ', num)
+
+            total_adjusted_reward = []
+            total_reward = []
+            total_request_num = []
+            matched_request_num = []
+            occupancy_rate = []
+            occupancy_rate_no_pickup = []
+            pickup_time = []
+            waiting_time = []
+
+            for date in TRAIN_DATE_LIST:
+                simulator.experiment_date = date
+                simulator.reset()
+                start_time = time.time()
+                for step in range(simulator.finish_run_step):
+                    simulator.driver_table['matching_radius'] = 0.5
+                    simulator.step()
+                end_time = time.time()
+
+                total_reward.append(simulator.total_reward)
+                total_adjusted_reward.append(simulator.total_reward_per_pickup_dist)
+                total_request_num.append(simulator.total_request_num)
+                occupancy_rate.append(simulator.occupancy_rate)
+                matched_request_num.append(simulator.matched_requests_num)
+                occupancy_rate_no_pickup.append(simulator.occupancy_rate_no_pickup)
+                pickup_time.append(simulator.pickup_time / simulator.matched_requests_num)
+                waiting_time.append(simulator.waiting_time / simulator.matched_requests_num)
+            
+            print("total reward", sum(total_reward))
+            print("total adjusted reeward", sum(total_adjusted_reward))
+            print("pick",np.mean(pickup_time))
+            print("wait", np.mean(waiting_time))
+            print("matching ratio", sum(matched_request_num)/ sum(total_request_num))
+            print("ocu rate", occupancy_rate)
+            
+        with open(f'greedy_radius_train.pkl', 'wb') as f:
+            pickle.dump(record_dict, f)
+
