@@ -198,7 +198,7 @@ if __name__ == "__main__":
 
             if (epoch > 95 and epoch % 10 == 0) or epoch == NUM_EPOCH - 1:
                 # save RL model parameters
-                parameter_path = (f"pre_trained/{args.rl_agent}/{args.rl_agent}_epoch{epoch}_{args.adjust_reward}_target100_model.pth")
+                parameter_path = (f"pre_trained/{args.rl_agent}/{args.rl_agent}_epoch{epoch}_{args.adjust_reward}_model.pth")
                 agent.save_parameters(parameter_path)
                 
         # serialize the record
@@ -236,7 +236,7 @@ if __name__ == "__main__":
                             args.epsilon, args.eps_min, args.eps_dec, args.target_update, args.experiment_mode, args.adjust_reward)
             print("dueling dqn agent is created")
 
-        parameter_path = (f"pre_trained/monday_small_radius/{args.rl_agent}/"
+        parameter_path = (f"pre_trained/{args.rl_agent}/"
                             f"{args.rl_agent}_epoch119_{args.adjust_reward}_model.pth")
         agent.load_parameters(parameter_path)
         print("RL agent parameter loaded")
@@ -379,24 +379,22 @@ if __name__ == "__main__":
             print("matching ratio", sum(matched_request_num)/ sum(total_request_num))
             print("ocu rate", occupancy_rate)
             
-            # # Add scalar to TensorBoard and store in record_dict
-            # record_dict['total_reward'].append(sum(total_reward))
-            # record_dict['total_adjusted_reward'].append(sum(total_adjusted_reward))
-            # record_dict['total_request_num'].append(sum(total_request_num))
-            # record_dict['matched_request_num'].append(sum(matched_request_num))
-            # record_dict['matched_request_ratio'].append(sum(matched_request_num) / sum(total_request_num))
-            # record_dict['occupancy_rate'].append(np.mean(occupancy_rate))
-            # record_dict['occupancy_rate_no_pickup'].append(np.mean(occupancy_rate_no_pickup))
-            # record_dict['pickup_time'].append(np.mean(pickup_time))
-            # record_dict['waiting_time'].append(np.mean(waiting_time))
+            # store in record_dict
+            record_dict['total_reward'].append(sum(total_reward))
+            record_dict['total_adjusted_reward'].append(sum(total_adjusted_reward))
+            record_dict['total_request_num'].append(sum(total_request_num))
+            record_dict['matched_request_num'].append(sum(matched_request_num))
+            record_dict['matched_request_ratio'].append(sum(matched_request_num) / sum(total_request_num))
+            record_dict['occupancy_rate'].append(np.mean(occupancy_rate))
+            record_dict['occupancy_rate_no_pickup'].append(np.mean(occupancy_rate_no_pickup))
+            record_dict['pickup_time'].append(np.mean(pickup_time))
+            record_dict['waiting_time'].append(np.mean(waiting_time))
 
-            # serialize the testing records
-        
-        # with open('action_array_log.pkl', 'wb') as f:
-        #     pickle.dump(simulator.random_action_collection, f)
+        # serialize the testing records
         with open(f'random_radius_train.pkl', 'wb') as f:
             pickle.dump(record_dict, f)
-    elif simulator.rl_mode == "greedy_radius":
+
+    elif simulator.rl_mode == "greedy":
         print("greedy radius process:")
         column_list = ['total_adjusted_reward', 'total_reward',
             'total_request_num', 'matched_request_num',
@@ -418,13 +416,13 @@ if __name__ == "__main__":
             occupancy_rate_no_pickup = []
             pickup_time = []
             waiting_time = []
+            simulator.driver_table['matching_radius'] = 0.5
 
-            for date in TRAIN_DATE_LIST:
+            for date in TEST_DATE_LIST:
                 simulator.experiment_date = date
                 simulator.reset()
                 start_time = time.time()
                 for step in range(simulator.finish_run_step):
-                    simulator.driver_table['matching_radius'] = 0.5
                     simulator.step()
                 end_time = time.time()
 
@@ -438,12 +436,25 @@ if __name__ == "__main__":
                 waiting_time.append(simulator.waiting_time / simulator.matched_requests_num)
             
             print("total reward", sum(total_reward))
-            print("total adjusted reeward", sum(total_adjusted_reward))
+            print("total adjusted reward", sum(total_adjusted_reward))
             print("pick",np.mean(pickup_time))
             print("wait", np.mean(waiting_time))
             print("matching ratio", sum(matched_request_num)/ sum(total_request_num))
             print("ocu rate", occupancy_rate)
+
+            record_dict['total_reward'].append(sum(total_reward))
+            record_dict['total_adjusted_reward'].append(sum(total_adjusted_reward))
+            record_dict['total_request_num'].append(sum(total_request_num))
+            record_dict['matched_request_num'].append(sum(matched_request_num))
+            record_dict['matched_request_ratio'].append(sum(matched_request_num) / sum(total_request_num))
+            record_dict['occupancy_rate'].append(np.mean(occupancy_rate))
+            record_dict['occupancy_rate_no_pickup'].append(np.mean(occupancy_rate_no_pickup))
+            record_dict['pickup_time'].append(np.mean(pickup_time))
+            record_dict['waiting_time'].append(np.mean(waiting_time))
             
-        with open(f'greedy_radius_train.pkl', 'wb') as f:
+        with open(f'greedy_radius_test.pkl', 'wb') as f:
             pickle.dump(record_dict, f)
+
+        with open('actions_log_test.pkl', 'wb') as f:
+            pickle.dump(simulator.action_collection, f)
 
