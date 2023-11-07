@@ -326,6 +326,119 @@ if __name__ == "__main__":
             with open(f'testing_record_{args.rl_agent}_immediate_reward.pkl', 'wb') as f:
                 pickle.dump(record_dict, f)
 
+    if simulator.experiment_mode == 'test' and simulator.rl_mode == "rl_greedy":
+        print("rl model fixed + greedy radius:")
+        column_list = ['total_adjusted_reward', 'total_reward',
+               'total_request_num', 'matched_request_num',
+               'matched_request_ratio',
+               'waiting_time', 'pickup_time',
+               'occupancy_rate','occupancy_rate_no_pickup']
+        
+        record_dict = {col: [] for col in column_list}
+
+        if args.rl_agent == "dqn":
+                agent = DqnAgent(args.action_space, args.num_layers, args.dim_list, args.lr, args.gamma,
+                                args.epsilon, args.eps_min, args.eps_dec, args.target_update, args.experiment_mode, args.adjust_reward)
+                print("dqn agent is created")
+        elif args.rl_agent == "ddqn":
+            agent = DDqnAgent(args.action_space, args.num_layers, args.dim_list, args.lr, args.gamma,
+                            args.epsilon, args.eps_min, args.eps_dec, args.target_update, args.experiment_mode, args.adjust_reward)
+            print("double dqn agent is created")
+        elif args.rl_agent == "dueling_dqn":
+            agent = DuelingDqnAgent(args.action_space, args.num_layers, args.dim_list, args.lr, args.gamma,
+                            args.epsilon, args.eps_min, args.eps_dec, args.target_update, args.experiment_mode, args.adjust_reward)
+            print("dueling dqn agent is created")
+
+        parameter_path = (f"pre_trained/{args.rl_agent}/"
+                            f"{args.rl_agent}_epoch119_{args.adjust_reward}_model.pth")
+        agent.load_parameters(parameter_path)
+        print("RL agent parameter loaded")
+
+        test_num = 10
+        for num in range(test_num):
+            print('num: ', num)
+
+            total_adjusted_reward = []
+            total_reward = []
+            total_request_num = []
+            matched_request_num = []
+            occupancy_rate = []
+            occupancy_rate_no_pickup = []
+            pickup_time = []
+            waiting_time = []
+
+            for date in TEST_DATE_LIST:
+                simulator.experiment_date = date
+                simulator.reset()
+                start_time = time.time()
+
+                for step in range(simulator.finish_run_step):
+                    # 1. for those agents who has reached the maximum radius accumulate time -> set the total_idle_time to be 0
+                    index_maximum_radius = simulator.driver_table['total_idle_time'] > simulator.delta_t * simulator.maximum_radius_accumulate_time_interval
+                    simulator.driver_table['total_idle_time'] = simulator.driver_table['total_idle_time'].where(index_maximum_radius , 0)
+
+                    # 2. distinguish between radius assignment with rl model and greedy strategy
+                    is_idle = (simulator.driver_table['status'] == 0) | (simulator.driver_table['status'] == 4)
+                    apply_rl = is_idle & simulator.driver_table['total_idle_time'] == 0  # just become idle (parking, cruising or repositioning)
+                    apply_greedy = is_idle & simulator.driver_table['total_idle_time'] > 0 # has been idle for a while (not able to match with an order in previous dispatching)
+
+                    # 2.1. apply the RL model for radius assignment
+                    # Fetch grid_ids for the idle drivers
+                    grid_ids = simulator.driver_table.loc[apply_rl, 'grid_id'].values.reshape(-1, 1)
+                    time_slices = np.full_like(grid_ids, simulator.time).reshape(-1, 1)
+                    # Determine the action_indices for the idle drivers
+                    states_array = np.hstack((time_slices, grid_ids)).astype(np.float32)
+                    action_indices = agent.choose_action(states_array)
+                    # Calculate matching radius for the idle drivers
+                    action_space_array = np.array(args.action_space)
+                    matching_radii = action_space_array[action_indices]
+
+                    # Update the simulator.driver_table in-place for the idle drivers
+                    simulator.driver_table.loc[apply_rl, 'action_index'] = action_indices
+                    simulator.driver_table.loc[apply_rl, 'matching_radius'] = matching_radii
+                    
+                    # 2.2 apply greedy incremental radius strategy for radius assignment
+                    #   upper boundary controlled by simulator.maximum_radius_accumulate_time_interval
+                    simulator.driver_table.loc[apply_greedy, 'matching_radius'] += 0.5
+                  
+                    # 3. run one step of simulator
+                    simulator.step()
+
+                end_time = time.time()
+
+                total_reward.append(simulator.total_reward)
+                total_adjusted_reward.append(simulator.total_reward_per_pickup_dist)
+                total_request_num.append(simulator.total_request_num)
+                occupancy_rate.append(simulator.occupancy_rate)
+                matched_request_num.append(simulator.matched_requests_num)
+                occupancy_rate_no_pickup.append(simulator.occupancy_rate_no_pickup)
+                pickup_time.append(simulator.pickup_time / simulator.matched_requests_num)
+                waiting_time.append(simulator.waiting_time / simulator.matched_requests_num)
+            
+            print("total reward", sum(total_reward))
+            print("total adjusted reeward", sum(total_adjusted_reward))
+            print("pick",np.mean(pickup_time))
+            print("wait", np.mean(waiting_time))
+            print("matching ratio", sum(matched_request_num)/ sum(total_request_num))
+            print("ocu rate", occupancy_rate)
+            
+            # store in record_dict
+            record_dict['total_reward'].append(sum(total_reward))
+            record_dict['total_adjusted_reward'].append(sum(total_adjusted_reward))
+            record_dict['total_request_num'].append(sum(total_request_num))
+            record_dict['matched_request_num'].append(sum(matched_request_num))
+            record_dict['matched_request_ratio'].append(sum(matched_request_num) / sum(total_request_num))
+            record_dict['occupancy_rate'].append(np.mean(occupancy_rate))
+            record_dict['occupancy_rate_no_pickup'].append(np.mean(occupancy_rate_no_pickup))
+            record_dict['pickup_time'].append(np.mean(pickup_time))
+            record_dict['waiting_time'].append(np.mean(waiting_time))
+
+        # serialize the testing records
+        with open(f'random_radius_train.pkl', 'wb') as f:
+            pickle.dump(record_dict, f)
+
+
+
     elif simulator.rl_mode == "random":
         print("random process:")
         column_list = ['total_adjusted_reward', 'total_reward',
@@ -416,12 +529,12 @@ if __name__ == "__main__":
             occupancy_rate_no_pickup = []
             pickup_time = []
             waiting_time = []
-            simulator.driver_table['matching_radius'] = 0.5
-
+            
             for date in TEST_DATE_LIST:
                 simulator.experiment_date = date
                 simulator.reset()
                 start_time = time.time()
+                simulator.driver_table['matching_radius'] = 0.5
                 for step in range(simulator.finish_run_step):
                     simulator.step()
                 end_time = time.time()
@@ -455,6 +568,6 @@ if __name__ == "__main__":
         with open(f'greedy_radius_test.pkl', 'wb') as f:
             pickle.dump(record_dict, f)
 
-        with open('actions_log_test.pkl', 'wb') as f:
+        with open('actions_log_true_test.pkl', 'wb') as f:
             pickle.dump(simulator.action_collection, f)
 

@@ -117,6 +117,10 @@ class Simulator:
         self.adjust_reward_by_radius = False
 
         self.action_collection = np.array([])
+
+        # add for rl greedy
+        self.maximum_radius_accumulate_time_interval = kwargs['maximum_radius_accumulate_time_interval']
+        
         
 
     def initial_base_tables(self):
@@ -784,7 +788,7 @@ class Simulator:
         :return: None
         """
         # update next state
-        # 车辆状态：0 cruise (park 或正在cruise)， 1 表示delivery，2 pickup, 3 表示下线, 4 reposition
+        # 车辆状态：0 cruise (park 或正在cruise)， 1 delivery，2 pickup, 3 offline, 4 reposition
         # 先更新未完成任务的，再更新已完成任务的
         self.driver_table['current_road_node_index'] = self.driver_table['current_road_node_index'].values.astype(int)
 
@@ -814,11 +818,8 @@ class Simulator:
         # for unfinished tasks
         self.driver_table.loc[loc_cruise, 'total_idle_time'] += self.delta_t
         # greedy matching radius seaching
-        if self.rl_mode in["greedy", "rl_greedy"]:
-            if self.rl_mode == "greedy":
-                self.driver_table.loc[loc_cruise, 'matching_radius'] = (1 + self.driver_table.loc[loc_cruise, 'total_idle_time'] / self.delta_t) * 0.5
-            elif self.rl_mode == "rl_greedy":
-                self.driver_table.loc[loc_cruise, 'matching_radius'] += (1 + self.driver_table.loc[loc_cruise, 'total_idle_time'] / self.delta_t) * 0.5
+        if self.rl_mode == "greedy":
+            self.driver_table.loc[loc_cruise, 'matching_radius'] = (1 + self.driver_table.loc[loc_cruise, 'total_idle_time'] / self.delta_t) * 0.5
             self.driver_table.loc[loc_cruise, 'matching_radius'] = self.driver_table.loc[loc_cruise, 'matching_radius'].clip(upper=6) # maximum radius is 6
 
         if self.rl_mode in ["matching_radius", "matching", "random", "fixed", "greedy", "rl_greedy"]:
