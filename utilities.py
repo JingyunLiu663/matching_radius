@@ -101,7 +101,7 @@ direction4_available_list = [] # right
 centroid_lng_list = []
 centroid_lat_list = []
 
-if env_params['rl_mode'] == "matching" or env_params['rl_mode'] == "matching_radius":
+if env_params['rl_mode'] == "matching" or env_params['rl_mode'] == "rl_1stage":
     for i in range(side**2):
 
         centroid_lng_list.append(result[result['grid_id']==i]['lng'])
@@ -381,10 +381,8 @@ def route_generation_array(origin_coord_array, dest_coord_array, mode='rg'):
             }
             re = mycollect.find_one(data)
             if re:
-                print("re found in MongoDB")
                 ite = [int(item) for item in re['itinerary_node_list'].strip('[').strip(']').split(', ')]
             else:
-                print("re not found in MongoDB")
                 ite = ox.distance.shortest_path(G, origin, dest, weight='length', cpus=16)
                 if ite is None:
                     ite = [origin, dest]
@@ -741,7 +739,7 @@ def order_dispatch_radius(wait_requests, driver_table, dispatch_method='LD',meth
                 matched_itinerary = [itinerary_node_list, itinerary_segment_dis_list, dis_array]
     return matched_pair_actual_indexs, np.array(matched_itinerary)
 
-def order_dispatch(wait_requests, driver_table, maximal_pickup_distance=950, dispatch_method='LD',method='pickup_distance'):
+def order_dispatch(wait_requests, driver_table, maximal_pickup_distance=1, dispatch_method='LD',method='pickup_distance'):
     """
     :param wait_requests: the requests of orders
     :type wait_requests: pandas.DataFrame

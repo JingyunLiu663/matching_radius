@@ -66,7 +66,7 @@ class DqnAgent:
     """
 
     def __init__(self, action_space: list, num_layers: int, layers_dimension_list: list, lr=5e-4, gamma=0.99,
-                 epsilon=1.0, eps_min=0.01, eps_dec=0.9978, target_replace_iter=2000, mode="train", adjust_reward=0):
+                 epsilon=1.0, eps_min=0.01, eps_dec=0.9978, target_replace_iter=2000, experiment_mode="train", adjust_reward=0, rl_mode="rl_1stage"):
         self.num_actions = len(action_space)
         self.num_layers = num_layers
         self.layers_dimension_list = layers_dimension_list
@@ -78,7 +78,7 @@ class DqnAgent:
         self.eps_dec = eps_dec
         self.target_replace_iter = target_replace_iter  # how often do we update the target network
         self.batch_size = BATCH_SIZE
-        self.mode = mode
+        self.experiment_mode = experiment_mode
 
         self.eval_net_update_times = 0
 
@@ -91,15 +91,15 @@ class DqnAgent:
         # to plot the loss curve
         self.loss = 0
         current_time = datetime.now().strftime('%b%d_%H-%M-%S')
-        if self.mode == "train":
+        if self.experiment_mode == "train":
             # Create a SummaryWriter object and specify the log directory
-            train_log_dir = f"runs/train/experiment_dqn_{adjust_reward}_{current_time}"
+            train_log_dir = f"runs/train/dqn_{rl_mode}_{adjust_reward}_{current_time}"
             self.train_writer = SummaryWriter(train_log_dir)
             hparam_dict = {'lr': self.lr, 'gamma': self.gamma, 'epsilon': self.epsilon, 'eps_min': self.eps_min, 'eps_dec': self.eps_dec, 'target_replace_iter': self.target_replace_iter}
             self.train_writer.add_hparams(hparam_dict, {})
             self.train_writer.close()
-        elif self.mode == "test":
-            test_log_dir = f"runs/test/experiment_dqn_{adjust_reward}_{current_time}"
+        elif self.experiment_mode == "test":
+            test_log_dir = f"runs/test/dqn_{rl_mode}_{adjust_reward}_{current_time}"
             self.test_writer = SummaryWriter(test_log_dir)
 
     def choose_action(self, states: np.array):
@@ -116,7 +116,7 @@ class DqnAgent:
             q_values = self.eval_net(state_tensor)
         # Default action selection is greedy
         action_indices = torch.argmax(q_values, dim=1).cpu().numpy()
-        if self.mode == "train":
+        if self.experiment_mode == "train":
             # Identify agents that should explore
             explorers = np.random.random(n) < self.epsilon
             # Generate random actions for explorers
@@ -128,7 +128,6 @@ class DqnAgent:
 
         # update the target network parameter
         if self.eval_net_update_times % self.target_replace_iter == 0:
-            self.update += 1
             self.target_net.load_state_dict(self.eval_net.state_dict())
 
         # convert numpy array to tensor

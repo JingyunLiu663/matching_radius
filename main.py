@@ -17,8 +17,8 @@ from dueling_dqn import DuelingDqnAgent
 import config
 from matplotlib import pyplot as plt
 import argparse
-import cProfile
-import pstats
+from train_test_log_generation import TrainTestLog, EpochLog
+
 
 
 def get_args():
@@ -26,7 +26,7 @@ def get_args():
 
     parser.add_argument('-rl_agent', type=str, default="dqn", help='RL agent') 
     parser.add_argument('-action_space', type=float, nargs='+',
-                        default=[1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 4.5, 5.0],
+                        default=[0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 4.5, 5.0, 5.5, 6.0],
                         help='action space - list of matching radius')
     parser.add_argument('-num_layers', type=int, default=2, help='Number of fully connected layers')
     parser.add_argument('-dim_list', type=int, nargs='+', default=[128, 128],
@@ -43,7 +43,7 @@ def get_args():
     # 0: False 1:True
     parser.add_argument('-adjust_reward', type=int, default=0, 
                         help='apply immediate reward(0), or adjust the reward by matching radius(1)') 
-    parser.add_argument('-rl_mode', type=str, default="matching_radius", help='maching_radius/random') #0: False 1: True
+    parser.add_argument('-rl_mode', type=str, default="rl_1stage", help='random') #0: False 1: True
     parser.add_argument('-experiment_mode', type=str, default="train", help="train/test")
     
     args = parser.parse_args()
@@ -63,16 +63,14 @@ if __name__ == "__main__":
     simulator.experiment_mode = args.experiment_mode
     simulator.rl_mode = args.rl_mode
 
-    if simulator.experiment_mode == 'train' and simulator.rl_mode == "matching_radius":
+    if simulator.adjust_reward_by_radius: 
+        print("reward adjusted by radius")
+    else:
+        print("reward not adjusted by radius")
+
+    if simulator.experiment_mode == 'train' and simulator.rl_mode == "rl_1stage":
         print("training process:")
-        # log record for evaluation metrics
-        column_list = ['epoch_average_loss', 'total_adjusted_reward', 'total_reward',
-               'total_request_num', 'matched_request_num',
-               'matched_request_ratio',
-               'waiting_time', 'pickup_time',
-               'occupancy_rate','occupancy_rate_no_pickup']
-        
-        record_dict = {col: [] for col in column_list}
+        train_log = TrainTestLog()
         # initialize the RL agent for matching radius 
         if args.rl_agent == "dqn":
             agent = DqnAgent(args.action_space, args.num_layers, args.dim_list, args.lr, args.gamma,
@@ -93,28 +91,16 @@ if __name__ == "__main__":
             agent.load_parameters(parameter_path)
             print("pre-trained model is loaded")
 
-  
+        epoch_log = EpochLog(simulator.experiment_mode)
+
         for epoch in range(NUM_EPOCH):
-            # each epoch walks through 5 weekdays in a row
-            episode_time = []
-            epoch_loss = []
-            episode_reward = []
-            episode_adjusted_reward = []
-            episode_total_request_num = []
-            episode_matched_requests_num = []
-            episode_occupancy_rate = []
-            episode_occupancy_rate_no_pickup = []
-            episode_pickup_time = []
-            episode_waiting_time = []
+            # clear former epoch log
+            epoch_log.reset()
 
             for date in TRAIN_DATE_LIST:
                 # initialize the environment - simulator.driver_table is constructed (a deep copy of sampled simulator.driver_info)
                 simulator.experiment_date = date
                 simulator.reset()
-                if simulator.adjust_reward_by_radius: 
-                    print("reward adjusted by radius")
-                else:
-                    print("reward not adjusted by radius")
 
                 start_time = time.time()
                 # for every time interval do:
@@ -147,86 +133,49 @@ if __name__ == "__main__":
                         states, action_indices, rewards, next_states= simulator.replay_buffer.sample(BATCH_SIZE)
                         agent.learn(states, action_indices, rewards, next_states)
                         # keep track of the loss per time step
-                        epoch_loss.append(agent.loss)
+                        epoch_log.add_loss_per_learning_step(agent.loss)
                 end_time = time.time()
 
                 print(f'epoch: {epoch} date:{date}')
                 print('epoch running time: ', end_time - start_time)
-                print('epoch average loss: ', np.mean(epoch_loss))
+                print('epoch average loss: ', np.mean(epoch_log.epoch_loss))
                 print('epoch total reward: ', simulator.total_reward)
                 print('total orders', simulator.total_request_num)
                 print('matched orders', simulator.matched_requests_num)
                 print('total adjusted reward', simulator.total_reward_per_pickup_dist)
                 print('matched order ratio', simulator.matched_requests_num / simulator.total_request_num)
 
-                episode_time.append(end_time - start_time)
-                episode_adjusted_reward.append(simulator.total_reward_per_pickup_dist)
-                episode_reward.append(simulator.total_reward)
-                episode_total_request_num.append(simulator.total_request_num)
-                episode_matched_requests_num.append(simulator.matched_requests_num)
-                episode_occupancy_rate.append(simulator.occupancy_rate)
-                episode_occupancy_rate_no_pickup.append(simulator.occupancy_rate_no_pickup)
-                episode_pickup_time.append(simulator.pickup_time)
-                episode_waiting_time.append(simulator.waiting_time)
+                epoch_log.add_within_epoch(simulator.total_reward, simulator.total_reward_per_pickup_dist, 
+                                           simulator.total_request_num, simulator.matched_requests_num,
+                                           simulator.occupancy_rate, simulator.occupancy_rate_no_pickup,
+                                           simulator.pickup_time, simulator.waiting_time, end_time - start_time)
             
             # add scalar to TensorBoard
-            
-            agent.train_writer.add_scalar('running time', np.mean(episode_time), epoch)
-            agent.train_writer.add_scalar('average loss', np.mean(epoch_loss), epoch)
-            agent.train_writer.add_scalar('total adjusted reward (per pickup distance)', sum(episode_adjusted_reward), epoch)
-            agent.train_writer.add_scalar('total reward', sum(episode_reward), epoch)
-            agent.train_writer.add_scalar('total orders', sum(episode_total_request_num), epoch)
-            agent.train_writer.add_scalar('matched orders', sum(episode_matched_requests_num), epoch)
-            agent.train_writer.add_scalar('matched request ratio', sum(episode_matched_requests_num)/ sum(episode_total_request_num), epoch)
-            agent.train_writer.add_scalar('matched occupancy rate', np.mean(episode_occupancy_rate), epoch)
-            agent.train_writer.add_scalar('matched occupancy rate - no pickup', np.mean(episode_occupancy_rate_no_pickup), epoch)
-            agent.train_writer.add_scalar('pickup time', np.mean(episode_pickup_time), epoch)
-            agent.train_writer.add_scalar('waiting time', np.mean(episode_waiting_time), epoch)
-            
+            epoch_log.add_to_tensorboard(agent, epoch)
 
             # store in record dict  
-            record_dict['epoch_average_loss'].append(np.mean(epoch_loss))
-            record_dict['total_adjusted_reward'].append(sum(episode_adjusted_reward))
-            record_dict['total_reward'].append(sum(episode_reward))
-            record_dict['total_request_num'].append(sum(episode_total_request_num))
-            record_dict['matched_request_num'].append(sum(episode_matched_requests_num))
-            record_dict['matched_request_ratio'].append(sum(episode_matched_requests_num) / sum(episode_total_request_num))
-            record_dict['occupancy_rate'].append(np.mean(episode_occupancy_rate))
-            record_dict['occupancy_rate_no_pickup'].append(np.mean(episode_occupancy_rate_no_pickup))
-            record_dict['pickup_time'].append(np.mean(episode_pickup_time))
-            record_dict['waiting_time'].append(np.mean(episode_waiting_time))
+            epoch_log.add_to_pickle_file(train_log.record_dict)
 
+            # save RL model parameters
             if (epoch > 95 and epoch % 10 == 0) or epoch == NUM_EPOCH - 1:
-                # save RL model parameters
                 parameter_path = (f"pre_trained/{args.rl_agent}/{args.rl_agent}_epoch{epoch}_{args.adjust_reward}_model.pth")
                 agent.save_parameters(parameter_path)
                 
         # serialize the record
-        if simulator.adjust_reward_by_radius:
-            with open(f'training_record_{args.rl_agent}_adjusted_reward_testing.pkl', 'wb') as f:
-                pickle.dump(record_dict, f)
-        else:
-            with open(f'training_record_{args.rl_agent}_immediate_reward_testing.pkl', 'wb') as f:
-                pickle.dump(record_dict, f)
+        train_log.save(args.rl_agent, adjust_reward=simulator.adjust_reward_by_radius, experiment_mode=simulator.experiment_mode, rl_mode=simulator.rl_mode)
                     
         # close TensorBoard writer
         agent.train_writer.close()
 
 
-    elif simulator.experiment_mode == 'test' and simulator.rl_mode == "matching_radius":
+    elif simulator.experiment_mode == 'test' and simulator.rl_mode == "rl_1stage":
         print("testing process:")
-        column_list = ['total_adjusted_reward', 'total_reward',
-               'total_request_num', 'matched_request_num',
-               'matched_request_ratio',
-               'waiting_time', 'pickup_time',
-               'occupancy_rate','occupancy_rate_no_pickup']
-        
-        record_dict = {col: [] for col in column_list}
+        test_log = TrainTestLog()
 
         if args.rl_agent == "dqn":
-                agent = DqnAgent(args.action_space, args.num_layers, args.dim_list, args.lr, args.gamma,
+            agent = DqnAgent(args.action_space, args.num_layers, args.dim_list, args.lr, args.gamma,
                                 args.epsilon, args.eps_min, args.eps_dec, args.target_update, args.experiment_mode, args.adjust_reward)
-                print("dqn agent is created")
+            print("dqn agent is created")
         elif args.rl_agent == "ddqn":
             agent = DDqnAgent(args.action_space, args.num_layers, args.dim_list, args.lr, args.gamma,
                             args.epsilon, args.eps_min, args.eps_dec, args.target_update, args.experiment_mode, args.adjust_reward)
@@ -241,21 +190,18 @@ if __name__ == "__main__":
         agent.load_parameters(parameter_path)
         print("RL agent parameter loaded")
 
+        epoch_log = EpochLog(simulator.experiment_mode)
         test_num = 10
         for num in range(test_num):
-            print('num: ', num)
-            total_adjusted_reward = []
-            total_reward = []
-            total_request_num = []
-            matched_request_num = []
-            occupancy_rate = []
-            occupancy_rate_no_pickup = []
-            pickup_time = []
-            waiting_time = []
+            print('test round: ', num)
+            # clear former epoch log
+            epoch_log.reset()
 
             for date in TEST_DATE_LIST:
                 simulator.experiment_date = date
                 simulator.reset()
+
+                start_time = time.time()
                 for step in range(simulator.finish_run_step):
                     # Get the boolean mask for idle drivers
                     is_idle = (simulator.driver_table['status'] == 0) | (simulator.driver_table['status'] == 4)
@@ -276,102 +222,66 @@ if __name__ == "__main__":
 
                     # observe the transition and store the transition in the replay buffer (simulator.dispatch_transitions_buffer)
                     simulator.step()
+                end_time = time.time()
 
-                total_reward.append(simulator.total_reward)
-                total_adjusted_reward.append(simulator.total_reward_per_pickup_dist)
-                total_request_num.append(simulator.total_request_num)
-                occupancy_rate.append(simulator.occupancy_rate)
-                matched_request_num.append(simulator.matched_requests_num)
-                occupancy_rate_no_pickup.append(simulator.occupancy_rate_no_pickup)
-                pickup_time.append(simulator.pickup_time / simulator.matched_requests_num)
-                waiting_time.append(simulator.waiting_time / simulator.matched_requests_num)
+                epoch_log.add_within_epoch(simulator.total_reward, simulator.total_reward_per_pickup_dist, 
+                                            simulator.total_request_num, simulator.matched_requests_num,
+                                            simulator.occupancy_rate, simulator.occupancy_rate_no_pickup,
+                                            simulator.pickup_time, simulator.waiting_time, end_time - start_time)
             
-            print("total reward", sum(total_reward))
-            print("total adjusted reeward", sum(total_adjusted_reward))
-            print("pick", np.mean(pickup_time))
-            print("wait", np.mean(waiting_time))
-            print("matching ratio", sum(matched_request_num)/ sum(total_request_num))
-            print("ocu rate", np.mean(occupancy_rate))
-            
+            print("total reward", sum(epoch_log.total_reward))
+            print("total adjusted reeward", sum(epoch_log.total_adjusted_reward))
+            print("pick", np.mean(epoch_log.pickup_time))
+            print("wait", np.mean(epoch_log.waiting_time))
+            print("matching ratio", sum(epoch_log.matched_requests_num)/ sum(epoch_log.total_request_num))
+            print("ocu rate", np.mean(epoch_log.occupancy_rate))
+
             # add scalar to TensorBoard
-            
-            agent.test_writer.add_scalar('total reward', sum(total_reward), num)
-            agent.test_writer.add_scalar('total adjusted reward (per pickup distance)', sum(total_adjusted_reward), num)
-            agent.test_writer.add_scalar('total orders', sum(total_request_num), num)
-            agent.test_writer.add_scalar('matched orders', sum(matched_request_num), num)
-            agent.test_writer.add_scalar('matched request ratio', sum(matched_request_num)/ sum(total_request_num), num)
-            agent.test_writer.add_scalar('matched occupancy rate', np.mean(occupancy_rate), num)
-            agent.test_writer.add_scalar('matched occupancy rate - no pickup', np.mean(occupancy_rate_no_pickup), num)
-            agent.test_writer.add_scalar('pickup time', np.mean(pickup_time), num)
-            agent.test_writer.add_scalar('waiting time', np.mean(waiting_time), num)
-            
-            # Add scalar to TensorBoard and store in record_dict
-            record_dict['total_reward'].append(sum(total_reward))
-            record_dict['total_adjusted_reward'].append(sum(total_adjusted_reward))
-            record_dict['total_request_num'].append(sum(total_request_num))
-            record_dict['matched_request_num'].append(sum(matched_request_num))
-            record_dict['matched_request_ratio'].append(sum(matched_request_num) / sum(total_request_num))
-            record_dict['occupancy_rate'].append(np.mean(occupancy_rate))
-            record_dict['occupancy_rate_no_pickup'].append(np.mean(occupancy_rate_no_pickup))
-            record_dict['pickup_time'].append(np.mean(pickup_time))
-            record_dict['waiting_time'].append(np.mean(waiting_time))
-           
+            epoch_log.add_to_tensorboard(agent, num)
+            # store in record dict  
+            epoch_log.add_to_pickle_file(test_log.record_dict)
+
         # close TensorBoard writer
         agent.test_writer.close()
-        # serialize the testing records
-        if simulator.adjust_reward_by_radius:
-            with open(f'testing_record_{args.rl_agent}_adjusted_reward.pkl', 'wb') as f:
-                pickle.dump(record_dict, f)
-        else:
-            with open(f'testing_record_{args.rl_agent}_immediate_reward.pkl', 'wb') as f:
-                pickle.dump(record_dict, f)
 
-    if simulator.experiment_mode == 'test' and simulator.rl_mode == "rl_greedy":
+        # serialize the record
+        test_log.save(args.rl_agent, adjust_reward=simulator.adjust_reward_by_radius, experiment_mode=simulator.experiment_mode, rl_mode=simulator.rl_mode)
+
+    elif simulator.experiment_mode == 'test' and simulator.rl_mode == "rl_greedy":
         print("rl model fixed + greedy radius:")
-        column_list = ['total_adjusted_reward', 'total_reward',
-               'total_request_num', 'matched_request_num',
-               'matched_request_ratio',
-               'waiting_time', 'pickup_time',
-               'occupancy_rate','occupancy_rate_no_pickup']
-        
-        record_dict = {col: [] for col in column_list}
+        test_log = TrainTestLog()
 
         if args.rl_agent == "dqn":
                 agent = DqnAgent(args.action_space, args.num_layers, args.dim_list, args.lr, args.gamma,
-                                args.epsilon, args.eps_min, args.eps_dec, args.target_update, args.experiment_mode, args.adjust_reward)
+                                args.epsilon, args.eps_min, args.eps_dec, args.target_update, args.experiment_mode, args.adjust_reward, simulator.rl_mode)
                 print("dqn agent is created")
         elif args.rl_agent == "ddqn":
             agent = DDqnAgent(args.action_space, args.num_layers, args.dim_list, args.lr, args.gamma,
-                            args.epsilon, args.eps_min, args.eps_dec, args.target_update, args.experiment_mode, args.adjust_reward)
+                            args.epsilon, args.eps_min, args.eps_dec, args.target_update, args.experiment_mode, args.adjust_reward, simulator.rl_mode)
             print("double dqn agent is created")
         elif args.rl_agent == "dueling_dqn":
             agent = DuelingDqnAgent(args.action_space, args.num_layers, args.dim_list, args.lr, args.gamma,
-                            args.epsilon, args.eps_min, args.eps_dec, args.target_update, args.experiment_mode, args.adjust_reward)
+                            args.epsilon, args.eps_min, args.eps_dec, args.target_update, args.experiment_mode, args.adjust_reward, simulator.rl_mode)
             print("dueling dqn agent is created")
 
-        parameter_path = (f"pre_trained/{args.rl_agent}/"
-                            f"{args.rl_agent}_epoch119_{args.adjust_reward}_model.pth")
+        # parameter_path = (f"pre_trained/{args.rl_agent}/"
+        #                     f"{args.rl_agent}_epoch119_{args.adjust_reward}_model.pth")
+        parameter_path = (f"pre_trained/temp/{args.rl_agent}_epoch119_{args.adjust_reward}_model.pth")
         agent.load_parameters(parameter_path)
         print("RL agent parameter loaded")
 
+        epoch_log = EpochLog(simulator.experiment_mode)
         test_num = 10
         for num in range(test_num):
-            print('num: ', num)
-
-            total_adjusted_reward = []
-            total_reward = []
-            total_request_num = []
-            matched_request_num = []
-            occupancy_rate = []
-            occupancy_rate_no_pickup = []
-            pickup_time = []
-            waiting_time = []
+            print('test round: ', num)
+            # clear former epoch log
+            epoch_log.reset()
 
             for date in TEST_DATE_LIST:
                 simulator.experiment_date = date
                 simulator.reset()
-                start_time = time.time()
 
+                start_time = time.time()
                 for step in range(simulator.finish_run_step):
                     # 1. for those agents who has reached the maximum radius accumulate time -> set the total_idle_time to be 0
                     index_maximum_radius = simulator.driver_table['total_idle_time'] > simulator.delta_t * simulator.maximum_radius_accumulate_time_interval
@@ -406,61 +316,43 @@ if __name__ == "__main__":
 
                 end_time = time.time()
 
-                total_reward.append(simulator.total_reward)
-                total_adjusted_reward.append(simulator.total_reward_per_pickup_dist)
-                total_request_num.append(simulator.total_request_num)
-                occupancy_rate.append(simulator.occupancy_rate)
-                matched_request_num.append(simulator.matched_requests_num)
-                occupancy_rate_no_pickup.append(simulator.occupancy_rate_no_pickup)
-                pickup_time.append(simulator.pickup_time / simulator.matched_requests_num)
-                waiting_time.append(simulator.waiting_time / simulator.matched_requests_num)
+                epoch_log.add_within_epoch(simulator.total_reward, simulator.total_reward_per_pickup_dist, 
+                                            simulator.total_request_num, simulator.matched_requests_num,
+                                            simulator.occupancy_rate, simulator.occupancy_rate_no_pickup,
+                                            simulator.pickup_time, simulator.waiting_time, end_time - start_time)
             
-            print("total reward", sum(total_reward))
-            print("total adjusted reeward", sum(total_adjusted_reward))
-            print("pick",np.mean(pickup_time))
-            print("wait", np.mean(waiting_time))
-            print("matching ratio", sum(matched_request_num)/ sum(total_request_num))
-            print("ocu rate", occupancy_rate)
-            
-            # store in record_dict
-            record_dict['total_reward'].append(sum(total_reward))
-            record_dict['total_adjusted_reward'].append(sum(total_adjusted_reward))
-            record_dict['total_request_num'].append(sum(total_request_num))
-            record_dict['matched_request_num'].append(sum(matched_request_num))
-            record_dict['matched_request_ratio'].append(sum(matched_request_num) / sum(total_request_num))
-            record_dict['occupancy_rate'].append(np.mean(occupancy_rate))
-            record_dict['occupancy_rate_no_pickup'].append(np.mean(occupancy_rate_no_pickup))
-            record_dict['pickup_time'].append(np.mean(pickup_time))
-            record_dict['waiting_time'].append(np.mean(waiting_time))
+            print("total reward", sum(epoch_log.total_reward))
+            print("total adjusted reeward", sum(epoch_log.total_adjusted_reward))
+            print("pick", np.mean(epoch_log.pickup_time))
+            print("wait", np.mean(epoch_log.waiting_time))
+            print("matching ratio", sum(epoch_log.matched_requests_num)/ sum(epoch_log.total_request_num))
+            print("ocu rate", np.mean(epoch_log.occupancy_rate))
 
-        # serialize the testing records
-        with open(f'random_radius_train.pkl', 'wb') as f:
-            pickle.dump(record_dict, f)
+            # add scalar to TensorBoard
+            epoch_log.add_to_tensorboard(agent, num)
+            # store in record dict  
+            epoch_log.add_to_pickle_file(test_log.record_dict)
 
+        # close TensorBoard writer
+        agent.test_writer.close()
 
-
+        # serialize the record
+        test_log.save(args.rl_agent, adjust_reward=simulator.adjust_reward_by_radius, experiment_mode=simulator.experiment_mode, rl_mode=simulator.rl_mode)
+        
+        with open("rl_greedy_action_collection.pkl", "wb") as f:
+            pickle.dump(simulator.action_collection, f)
+    
     elif simulator.rl_mode == "random":
         print("random process:")
-        column_list = ['total_adjusted_reward', 'total_reward',
-               'total_request_num', 'matched_request_num',
-               'matched_request_ratio',
-               'waiting_time', 'pickup_time',
-               'occupancy_rate','occupancy_rate_no_pickup']
-        
-        record_dict = {col: [] for col in column_list}
+        test_log = TrainTestLog()
 
+        epoch_log = EpochLog(simulator.experiment_mode)
         test_num = 10
         for num in range(test_num):
-            print('num: ', num)
+            print('test round: ', num)
 
-            total_adjusted_reward = []
-            total_reward = []
-            total_request_num = []
-            matched_request_num = []
-            occupancy_rate = []
-            occupancy_rate_no_pickup = []
-            pickup_time = []
-            waiting_time = []
+            # clear former epoch log
+            epoch_log.reset()
 
             for date in TEST_DATE_LIST:
                 simulator.experiment_date = date
@@ -476,59 +368,34 @@ if __name__ == "__main__":
                     simulator.step()
                 end_time = time.time()
 
-                total_reward.append(simulator.total_reward)
-                total_adjusted_reward.append(simulator.total_reward_per_pickup_dist)
-                total_request_num.append(simulator.total_request_num)
-                occupancy_rate.append(simulator.occupancy_rate)
-                matched_request_num.append(simulator.matched_requests_num)
-                occupancy_rate_no_pickup.append(simulator.occupancy_rate_no_pickup)
-                pickup_time.append(simulator.pickup_time / simulator.matched_requests_num)
-                waiting_time.append(simulator.waiting_time / simulator.matched_requests_num)
+                epoch_log.add_within_epoch(simulator.total_reward, simulator.total_reward_per_pickup_dist, 
+                                            simulator.total_request_num, simulator.matched_requests_num,
+                                            simulator.occupancy_rate, simulator.occupancy_rate_no_pickup,
+                                            simulator.pickup_time, simulator.waiting_time, end_time - start_time)
             
-            print("total reward", sum(total_reward))
-            print("total adjusted reeward", sum(total_adjusted_reward))
-            print("pick",np.mean(pickup_time))
-            print("wait", np.mean(waiting_time))
-            print("matching ratio", sum(matched_request_num)/ sum(total_request_num))
-            print("ocu rate", occupancy_rate)
-            
-            # store in record_dict
-            record_dict['total_reward'].append(sum(total_reward))
-            record_dict['total_adjusted_reward'].append(sum(total_adjusted_reward))
-            record_dict['total_request_num'].append(sum(total_request_num))
-            record_dict['matched_request_num'].append(sum(matched_request_num))
-            record_dict['matched_request_ratio'].append(sum(matched_request_num) / sum(total_request_num))
-            record_dict['occupancy_rate'].append(np.mean(occupancy_rate))
-            record_dict['occupancy_rate_no_pickup'].append(np.mean(occupancy_rate_no_pickup))
-            record_dict['pickup_time'].append(np.mean(pickup_time))
-            record_dict['waiting_time'].append(np.mean(waiting_time))
+            print("total reward", sum(epoch_log.total_reward))
+            print("total adjusted reeward", sum(epoch_log.total_adjusted_reward))
+            print("pick", np.mean(epoch_log.pickup_time))
+            print("wait", np.mean(epoch_log.waiting_time))
+            print("matching ratio", sum(epoch_log.matched_requests_num)/ sum(epoch_log.total_request_num))
+            print("ocu rate", np.mean(epoch_log.occupancy_rate))
 
-        # serialize the testing records
-        with open(f'random_radius_train.pkl', 'wb') as f:
-            pickle.dump(record_dict, f)
+            # store in record dict  
+            epoch_log.add_to_pickle_file(test_log.record_dict)
+
+        # serialize the record
+        test_log.save(rl_agent=None, adjust_reward=simulator.adjust_reward_by_radius, experiment_mode=simulator.experiment_mode, rl_mode=simulator.rl_mode)
 
     elif simulator.rl_mode == "greedy":
         print("greedy radius process:")
-        column_list = ['total_adjusted_reward', 'total_reward',
-            'total_request_num', 'matched_request_num',
-            'matched_request_ratio',
-            'waiting_time', 'pickup_time',
-            'occupancy_rate','occupancy_rate_no_pickup']
-        
-        record_dict = {col: [] for col in column_list}
-
+        test_log = TrainTestLog()
+        epoch_log = EpochLog(simulator.experiment_mode)
         test_num = 10
         for num in range(test_num):
-            print('num: ', num)
+            print('test round: ', num)
 
-            total_adjusted_reward = []
-            total_reward = []
-            total_request_num = []
-            matched_request_num = []
-            occupancy_rate = []
-            occupancy_rate_no_pickup = []
-            pickup_time = []
-            waiting_time = []
+            # clear former epoch log
+            epoch_log.reset()
             
             for date in TEST_DATE_LIST:
                 simulator.experiment_date = date
@@ -539,35 +406,20 @@ if __name__ == "__main__":
                     simulator.step()
                 end_time = time.time()
 
-                total_reward.append(simulator.total_reward)
-                total_adjusted_reward.append(simulator.total_reward_per_pickup_dist)
-                total_request_num.append(simulator.total_request_num)
-                occupancy_rate.append(simulator.occupancy_rate)
-                matched_request_num.append(simulator.matched_requests_num)
-                occupancy_rate_no_pickup.append(simulator.occupancy_rate_no_pickup)
-                pickup_time.append(simulator.pickup_time / simulator.matched_requests_num)
-                waiting_time.append(simulator.waiting_time / simulator.matched_requests_num)
+                epoch_log.add_within_epoch(simulator.total_reward, simulator.total_reward_per_pickup_dist, 
+                                            simulator.total_request_num, simulator.matched_requests_num,
+                                            simulator.occupancy_rate, simulator.occupancy_rate_no_pickup,
+                                            simulator.pickup_time, simulator.waiting_time, end_time - start_time)
             
-            print("total reward", sum(total_reward))
-            print("total adjusted reward", sum(total_adjusted_reward))
-            print("pick",np.mean(pickup_time))
-            print("wait", np.mean(waiting_time))
-            print("matching ratio", sum(matched_request_num)/ sum(total_request_num))
-            print("ocu rate", occupancy_rate)
+            print("total reward", sum(epoch_log.total_reward))
+            print("total adjusted reeward", sum(epoch_log.total_adjusted_reward))
+            print("pick", np.mean(epoch_log.pickup_time))
+            print("wait", np.mean(epoch_log.waiting_time))
+            print("matching ratio", sum(epoch_log.matched_requests_num)/ sum(epoch_log.total_request_num))
+            print("ocu rate", np.mean(epoch_log.occupancy_rate))
 
-            record_dict['total_reward'].append(sum(total_reward))
-            record_dict['total_adjusted_reward'].append(sum(total_adjusted_reward))
-            record_dict['total_request_num'].append(sum(total_request_num))
-            record_dict['matched_request_num'].append(sum(matched_request_num))
-            record_dict['matched_request_ratio'].append(sum(matched_request_num) / sum(total_request_num))
-            record_dict['occupancy_rate'].append(np.mean(occupancy_rate))
-            record_dict['occupancy_rate_no_pickup'].append(np.mean(occupancy_rate_no_pickup))
-            record_dict['pickup_time'].append(np.mean(pickup_time))
-            record_dict['waiting_time'].append(np.mean(waiting_time))
-            
-        with open(f'greedy_radius_test.pkl', 'wb') as f:
-            pickle.dump(record_dict, f)
+            # store in record dict  
+            epoch_log.add_to_pickle_file(test_log.record_dict)
 
-        with open('actions_log_true_test.pkl', 'wb') as f:
-            pickle.dump(simulator.action_collection, f)
-
+        # serialize the record
+        test_log.save(rl_agent=None, adjust_reward=simulator.adjust_reward_by_radius, experiment_mode=simulator.experiment_mode, rl_mode=simulator.rl_mode)

@@ -372,7 +372,7 @@ class Simulator:
             self.driver_table.loc[cor_driver[con_remain], 'remaining_time_for_current_node'] = \
                 matched_itinerary_df[con_remain]['itinerary_segment_dis_list'].map(lambda x: x[0]).values / self.vehicle_speed * 3600
 
-            if self.rl_mode in ["matching_radius", "matching", "random", "fixed", "greedy", "rl_greedy"]:
+            if self.rl_mode in ["rl_1stage", "matching", "random", "fixed", "greedy", "rl_greedy"]:
                 state_array = None
                 action_array = None
                 reward_array = None
@@ -380,7 +380,7 @@ class Simulator:
                 if self.rl_mode in ["random", "greedy", "rl_greedy"]:
                     self.action_collection = np.concatenate((self.action_collection, 
                                                                     self.driver_table.loc[cor_driver[con_remain], 'matching_radius'].values))
-                if self.rl_mode in ["matching_radius", "rl_greedy"] :
+                if self.rl_mode in ["rl_1stage", "rl_greedy"] :
                     state_array = np.vstack([self.time + np.zeros(new_matched_requests.shape[0]),
                                              self.driver_table.loc[cor_driver[con_remain], 'grid_id'].values]).T
                     if self.adjust_reward_by_radius:
@@ -564,7 +564,7 @@ class Simulator:
 
         # reposition decision
         # total_idle_time 为reposition间的间隔， time to last both-rg-cruising 为cruising间的间隔。
-        if self.reposition_flag and (self.rl_mode in ["matching_radius", "matching", "random", "fixed", "greedy", "rl_greedy"]):
+        if self.reposition_flag and (self.rl_mode in ["rl_1stage", "matching", "random", "fixed", "greedy", "rl_greedy"]):
             con_eligibe = (self.driver_table['total_idle_time'] > self.eligible_time_for_reposition) & \
                           (self.driver_table['status'] == 0)
             eligible_driver_table = self.driver_table[con_eligibe]
@@ -587,7 +587,7 @@ class Simulator:
                 self.driver_table.loc[eligible_driver_index, 'target_loc_lat'] = lat_array
                 self.driver_table.loc[eligible_driver_index, 'target_grid_id'] = grid_id_array
         if self.cruise_flag:
-            if self.rl_mode in ["matching_radius", "matching", "random", "fixed", "greedy", "rl_greedy"]:
+            if self.rl_mode in ["rl_1stage", "matching", "random", "fixed", "greedy", "rl_greedy"]:
                 con_eligibe = (self.driver_table['time_to_last_cruising'] >= self.max_idle_time) & \
                             (self.driver_table['status'] == 0)
             elif self.rl_mode == 'reposition':
@@ -621,7 +621,7 @@ class Simulator:
                 state_array = np.vstack(
                     [self.time + self.delta_t - self.max_idle_time + np.zeros(grid_id_array.shape[0]),
                      grid_id_array]).T
-                if self.rl_mode in ["matching_radius", "matching", "random", "fixed", "greedy", "rl_greedy"]:
+                if self.rl_mode in ["rl_1stage", "matching", "random", "fixed", "greedy", "rl_greedy"]:
                     remaining_time_array = self.driver_table.loc[eligible_driver_index, 'remaining_time'].values
                 elif self.rl_mode == 'reposition':
                     remaining_time_array = self.driver_table.loc[eligible_driver_index, 'remaining_time'].map(
@@ -793,7 +793,7 @@ class Simulator:
         self.driver_table['current_road_node_index'] = self.driver_table['current_road_node_index'].values.astype(int)
 
         loc_cruise = self.driver_table['status'] == 0
-        if self.rl_mode in ["matching_radius", "matching", "random", "fixed", "greedy", "rl_greedy"]:
+        if self.rl_mode in ["rl_1stage", "matching", "random", "fixed", "greedy", "rl_greedy"]:
             loc_actually_cruising = loc_cruise & (self.driver_table['remaining_time'] > 0)
         elif self.rl_mode == 'reposition':
             loc_reposition = self.driver_table['status'] == 4
@@ -822,7 +822,7 @@ class Simulator:
             self.driver_table.loc[loc_cruise, 'matching_radius'] = (1 + self.driver_table.loc[loc_cruise, 'total_idle_time'] / self.delta_t) * 0.5
             self.driver_table.loc[loc_cruise, 'matching_radius'] = self.driver_table.loc[loc_cruise, 'matching_radius'].clip(upper=6) # maximum radius is 6
 
-        if self.rl_mode in ["matching_radius", "matching", "random", "fixed", "greedy", "rl_greedy"]:
+        if self.rl_mode in ["rl_1stage", "matching", "random", "fixed", "greedy", "rl_greedy"]:
             con_real_time_ongoing = loc_unfinished & (loc_cruise | loc_reposition | loc_delivery) | loc_pickup 
         elif self.rl_mode == 'reposition':
             con_real_time_ongoing = loc_unfinished & (loc_cruise | loc_reposition) | loc_pickup
@@ -965,7 +965,7 @@ class Simulator:
         # Step 1: order dispatching
         wait_requests = deepcopy(self.wait_requests)
         driver_table = deepcopy(self.driver_table)
-        if self.rl_mode in ["matching_radius", "random", "greedy", "rl_greedy"]:
+        if self.rl_mode in ["rl_1stage", "random", "greedy", "rl_greedy"]:
             matched_pair_actual_indexes, matched_itinerary = order_dispatch_radius(wait_requests, driver_table, 
                                            self.dispatch_method, self.method, self.adjust_reward_by_radius)
         elif self.rl_mode == "fixed":

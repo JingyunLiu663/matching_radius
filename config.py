@@ -41,7 +41,7 @@ env_params = {
     'south_lat': 40.6968,
     'east_lng': -74.0831,
     'west_lng': -73.8414,
-    'rl_mode': 'matching_radius',  # ['reposition','matching_radius', 'random', 'fixed', 'greedy', 'rl_greedy']
+    'rl_mode': 'rl_1stage',  # ['rl_1stage', 'random', 'fixed', 'greedy', 'rl_greedy']
     'method': 'sarsa_no_subway',  #  'sarsa_no_subway' / 'pickup_distance' / 'instant_reward_no_subway'   #  rl for matching
     'reposition_method': 'A2C_global_aware',  # A2C, A2C_global_aware, random_cruise, stay  # rl for repositioning
     'dayparting': False, # if true, simulator_env will compute information based on time periods in a day, e.g. 'morning', 'afternoon'
