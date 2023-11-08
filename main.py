@@ -157,12 +157,12 @@ if __name__ == "__main__":
             epoch_log.add_to_pickle_file(train_log.record_dict)
 
             # save RL model parameters
-            if (epoch > 95 and epoch % 10 == 0) or epoch == NUM_EPOCH - 1:
-                parameter_path = (f"pre_trained/{args.rl_agent}/{args.rl_agent}_epoch{epoch}_{args.adjust_reward}_model.pth")
-                agent.save_parameters(parameter_path)
+            # if (epoch > 95 and epoch % 10 == 0) or epoch == NUM_EPOCH - 1:
+            #     parameter_path = (f"pre_trained/{args.rl_agent}/{args.rl_agent}_epoch{epoch}_{args.adjust_reward}_model.pth")
+            #     agent.save_parameters(parameter_path)
                 
         # serialize the record
-        train_log.save(args.rl_agent, adjust_reward=simulator.adjust_reward_by_radius, experiment_mode=simulator.experiment_mode, rl_mode=simulator.rl_mode)
+        # train_log.save(args.rl_agent, adjust_reward=simulator.adjust_reward_by_radius, experiment_mode=simulator.experiment_mode, rl_mode=simulator.rl_mode)
                     
         # close TensorBoard writer
         agent.train_writer.close()
@@ -280,19 +280,18 @@ if __name__ == "__main__":
             for date in TEST_DATE_LIST:
                 simulator.experiment_date = date
                 simulator.reset()
+                simulator.driver_table['matching_radius'] = 0.5
 
                 start_time = time.time()
                 for step in range(simulator.finish_run_step):
-                    # 1. for those agents who has reached the maximum radius accumulate time -> set the total_idle_time to be 0
-                    index_maximum_radius = simulator.driver_table['total_idle_time'] > simulator.delta_t * simulator.maximum_radius_accumulate_time_interval
-                    simulator.driver_table['total_idle_time'] = simulator.driver_table['total_idle_time'].where(index_maximum_radius , 0)
+                    
 
-                    # 2. distinguish between radius assignment with rl model and greedy strategy
+                    # 1. distinguish between radius assignment with rl model and greedy strategy
                     is_idle = (simulator.driver_table['status'] == 0) | (simulator.driver_table['status'] == 4)
                     apply_rl = is_idle & simulator.driver_table['total_idle_time'] == 0  # just become idle (parking, cruising or repositioning)
                     apply_greedy = is_idle & simulator.driver_table['total_idle_time'] > 0 # has been idle for a while (not able to match with an order in previous dispatching)
 
-                    # 2.1. apply the RL model for radius assignment
+                    # 1.1. apply the RL model for radius assignment
                     # Fetch grid_ids for the idle drivers
                     grid_ids = simulator.driver_table.loc[apply_rl, 'grid_id'].values.reshape(-1, 1)
                     time_slices = np.full_like(grid_ids, simulator.time).reshape(-1, 1)
@@ -307,9 +306,11 @@ if __name__ == "__main__":
                     simulator.driver_table.loc[apply_rl, 'action_index'] = action_indices
                     simulator.driver_table.loc[apply_rl, 'matching_radius'] = matching_radii
                     
-                    # 2.2 apply greedy incremental radius strategy for radius assignment
+                    # 1.2 apply greedy incremental radius strategy for radius assignment
                     #   upper boundary controlled by simulator.maximum_radius_accumulate_time_interval
                     simulator.driver_table.loc[apply_greedy, 'matching_radius'] += 0.5
+                    # 2. for those agents who has reached the maximum radius accumulate time -> set the total_idle_time to be 0
+                    simulator.driver_table.loc[simulator.driver_table['matching_radius'] > 6, 'total_idle_time'] = 0
                   
                     # 3. run one step of simulator
                     simulator.step()
@@ -339,7 +340,7 @@ if __name__ == "__main__":
         # serialize the record
         test_log.save(args.rl_agent, adjust_reward=simulator.adjust_reward_by_radius, experiment_mode=simulator.experiment_mode, rl_mode=simulator.rl_mode)
         
-        with open("rl_greedy_action_collection.pkl", "wb") as f:
+        with open(f"rl_greedy_action_collection_{simulator.rl_mode}_{args.rl_agent}_{simulator.adjust_reward_by_radius}_{simulator.maximum_radius_accumulate_time_interval}.pkl", "wb") as f:
             pickle.dump(simulator.action_collection, f)
     
     elif simulator.rl_mode == "random":
