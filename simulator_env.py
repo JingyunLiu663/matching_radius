@@ -5,6 +5,7 @@ np.warnings.filterwarnings('ignore', category=np.VisibleDeprecationWarning)
 import sys
 import cProfile
 import pstats
+import io
 
 class Simulator:
     def __init__(self, **kwargs):
@@ -117,11 +118,6 @@ class Simulator:
         self.adjust_reward_by_radius = False
 
         self.action_collection = np.array([])
-
-        # add for rl greedy
-        self.maximum_radius_accumulate_time_interval = kwargs['maximum_radius_accumulate_time_interval']
-        
-        
 
     def initial_base_tables(self):
         """
@@ -377,7 +373,7 @@ class Simulator:
                 action_array = None
                 reward_array = None
                 next_state_array = None
-                if self.rl_mode in ["random", "greedy", "rl_greedy"]:
+                if self.rl_mode in ["random", "greedy", "rl_greedy", "rl_1stage"]:
                     self.action_collection = np.concatenate((self.action_collection, 
                                                                     self.driver_table.loc[cor_driver[con_remain], 'matching_radius'].values))
                 if self.rl_mode in ["rl_1stage", "rl_greedy"] :
@@ -820,7 +816,8 @@ class Simulator:
         # greedy matching radius seaching
         if self.rl_mode == "greedy":
             self.driver_table.loc[loc_cruise, 'matching_radius'] = (1 + self.driver_table.loc[loc_cruise, 'total_idle_time'] / self.delta_t) * 0.5
-            self.driver_table.loc[loc_cruise, 'matching_radius'] = self.driver_table.loc[loc_cruise, 'matching_radius'].clip(upper=6) # maximum radius is 6
+            # maximum radius is 6
+            self.driver_table.loc[self.driver_table['matching_radius'] > 6, 'total_idle_time'] = 0
 
         if self.rl_mode in ["rl_1stage", "matching", "random", "fixed", "greedy", "rl_greedy"]:
             con_real_time_ongoing = loc_unfinished & (loc_cruise | loc_reposition | loc_delivery) | loc_pickup 
@@ -960,8 +957,8 @@ class Simulator:
         """
         This function used to run the simulator step by step
         """
-        # pr = cProfile.Profile()
-        # pr.enable()
+        pr = cProfile.Profile()
+        pr.enable()
         # Step 1: order dispatching
         wait_requests = deepcopy(self.wait_requests)
         driver_table = deepcopy(self.driver_table)
@@ -1019,13 +1016,14 @@ class Simulator:
 
         # Step 7: update time
         self.update_time()
-        # pr.disable()
+        pr.disable()
       
-        # # Save stats to a file
-        # pr.dump_stats("output.pstats")
-
-        # # Create a `Stats` object
-        # stats = pstats.Stats("output.pstats")
+        # Save stats to a file
+        pr.dump_stats('profile_output.pstats')
+        with open('profile_output.txt', 'w') as f:
+            ps = pstats.Stats(pr, stream=f) 
+            sortby = 'cumulative'
+            ps.strip_dirs().sort_stats(sortby).print_stats()
 
 
     def step1(self): # rl for repositioning
