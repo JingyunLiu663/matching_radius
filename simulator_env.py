@@ -52,8 +52,6 @@ class Simulator:
                           'driver_file_name': self.driver_file_name}
         pattern = SimulatorPattern(**pattern_params)
 
-        # self.method = kwargs.pop('method', 'no_subway')  # rl for matching
-
         # road network
         road_network_file_name = kwargs['road_network_file_name']
         '''
@@ -105,19 +103,17 @@ class Simulator:
         # TJ
         self.total_reward = 0
         #TJ
-        #JL
-        self.total_pickup_dist = 0
-        self.total_reward_per_pickup_dist = 0
-        # JL
         if self.rl_mode == 'reposition':
             self.reposition_method = kwargs['reposition_method']  # rl for repositioning
-
-        # add for matching radius
-        self.replay_buffer = ReplayBuffer(100000)  
-
         self.adjust_reward_by_radius = False
-
-        self.action_collection = np.array([])
+        # JL
+        self.total_pickup_dist = 0
+        self.total_reward_per_pickup_dist = 0
+        self.idle_drivers_per_grid = None
+        self.open_orders_per_grid = None
+        self.terminal_orders_with_rewards = {}
+        self.orders = OrderTrajectory()
+        # JL
 
     def initial_base_tables(self):
         """
@@ -164,7 +160,7 @@ class Simulator:
         # construct order tabledd
         # TJ
         if self.experiment_date in self.request_all.keys():
-            self.request_databases = deepcopy(self.request_all[self.experiment_date])  # 这里取出来之后是个list
+            self.request_databases = deepcopy(self.request_all[self.experiment_date])  
         else:
             self.request_databases = []
         # TJ
@@ -172,7 +168,6 @@ class Simulator:
         request_list = []
         for i in range(env_params['t_initial'],env_params['t_end']):
             try:
-                # request_databases[i] - [[]]
                 for j in self.request_databases[i]:
                     request_list.append(j)
             except:
@@ -192,8 +187,6 @@ class Simulator:
         self.requests['pickup_end_time'] = 0
         self.requests['delivery_end_time'] = 0
         # TJ
-        # self.requests['immediate_reward'] = 2.5
-        # TJ
         self.wait_requests = pd.DataFrame(columns=self.request_columns)
         self.matched_requests = pd.DataFrame(columns=self.request_columns)
         # TJ
@@ -205,12 +198,7 @@ class Simulator:
         self.total_online_time = self.driver_table.shape[0] * (self.t_end - self.t_initial)
         self.waiting_time = 0
         self.pickup_time = 0
-        #JL
-        self.total_pickup_dist = 0
-        self.total_reward_per_pickup_dist = 0
-        # JL
 
-        # self.matched_transferred_requests_num = 0
         self.matched_long_requests_num = 0
         self.matched_medium_requests_num = 0
         self.matched_short_requests_num = 0
@@ -229,7 +217,14 @@ class Simulator:
         self.step5 = 0
         self.step6 = 0
         self.step7 = 0
-
+        # JL
+        self.total_pickup_dist = 0
+        self.total_reward_per_pickup_dist = 0
+        self.idle_drivers_per_grid = None
+        self.open_orders_per_grid = None
+        self.terminal_orders_with_rewards = {}
+        self.orders = OrderTrajectory()
+        # JL
 
     def reset(self):
         self.initial_base_tables()
@@ -260,7 +255,6 @@ class Simulator:
             indices = np.where(grid_id_array.reshape(grid_id_array.size, 1) == self.zone_id_array)[1]
             self.avg_revenue_by_grid[indices] = gsum['designed_reward'].values
             self.avg_revenue_by_grid = self.avg_revenue_by_grid / idle_drivers_pre
-            # print('avg_revenue_by_grid: ', self.avg_revenue_by_grid)
 
             # rl for repositioning
         new_matched_requests = pd.DataFrame([], columns=self.request_columns)
@@ -276,12 +270,37 @@ class Simulator:
         matched_order_id_list = matched_pair_index_df['order_id'].values.tolist()
         con_matched = self.wait_requests['order_id'].isin(matched_order_id_list)
         con_keep_wait = self.wait_requests['wait_time'] <= self.wait_requests['maximum_wait_time']
-
+        
         # price and pickup time info which used to judge whether cancel the order-driver pair
         matched_itinerary_df['pickup_time'] = matched_itinerary_df['pickup_distance'].values / self.vehicle_speed * 3600
 
         # extract the order is matched
         df_matched = self.wait_requests[con_matched].reset_index(drop=True)
+
+        # JL
+        # an order will be cancelled due to: 1. the matching time is too long; or 2. the pick-up time is too long
+        cancel_due_to_matching = self.wait_requests['wait_time'] > self.wait_requests['maximum_wait_time']
+        if df_matched.shape[0] > 0:
+               # only when there is successfully matched orders do we have to check the pick-up time
+            cancelled_due_to_pickup = (matched_itinerary_df['pickup_time'] > 
+                df_matched['maximum_pickup_time_passenger_can_tolerate'])
+            # Reindex cancelled_due_to_pickup to match cancel_due_to_matching
+            cancelled_due_to_pickup = cancelled_due_to_pickup.reindex(cancel_due_to_matching.index, fill_value=False)
+            passenger_cancelled = cancel_due_to_matching | cancelled_due_to_pickup
+        else:
+            passenger_cancelled = cancel_due_to_matching
+
+        cancelled_requests = df_matched[passenger_cancelled]
+        # for cancelled orders, negative reward shall be applied as penalty
+        if self.rl_mode == 'rl' and cancelled_requests.shape[0] > 0:
+            def compute_rewards(row):
+                order_id = row.name  # Since 'order_id' is now the index, use row.name to get it
+                reward = -1 * row['designed_reward']
+                return self.orders.compute_discounted_rewards(order_id, reward)
+            cancelled_requests.set_index('order_id', inplace=True)
+            self.terminal_orders_with_rewards = cancelled_requests.apply(compute_rewards, axis=1).to_dict()
+        # JL
+
         if df_matched.shape[0] > 0:
             idle_driver_table = self.driver_table[(self.driver_table['status'] == 0) | (self.driver_table['status'] == 4)]
             order_array = df_matched['order_id'].values
@@ -299,10 +318,8 @@ class Simulator:
             con_driver_remain = prob_array >= driver_cancel_prob
 
             # price and pickup time moudle which used to judge whether cancel the order-driver pair
-            # matched_itinerary_df['pickup_time'].values
-            con_passenge_keep_wait = df_matched['maximum_pickup_time_passenger_can_tolerate'].values > \
+            con_passenge_keep_wait = df_matched['maximum_pickup_time_passenger_can_tolerate'].values >= \
                                                         matched_itinerary_df['pickup_time'].values
-
 
             con_passenger_remain = con_passenge_keep_wait
             con_remain = con_driver_remain & con_passenger_remain
@@ -316,10 +333,6 @@ class Simulator:
             new_matched_requests = df_matched[con_remain]
             new_matched_requests['t_matched'] = self.time
             new_matched_requests['pickup_distance'] = matched_itinerary_df[con_remain]['pickup_distance'].values
-            #TODO
-            # JL: added for matching radius 
-            # new_matched_requests['reward_per_pickup_dist'] = new_matched_requests['designed_reward'] / new_matched_requests['pickup_distance'] 
-            # JL
             new_matched_requests['pickup_time'] = new_matched_requests['pickup_distance'].values / self.vehicle_speed * 3600
             new_matched_requests['t_end'] = self.time + new_matched_requests['pickup_time'].values + new_matched_requests['trip_time'].values
             new_matched_requests['status'] = 1
@@ -368,51 +381,40 @@ class Simulator:
             self.driver_table.loc[cor_driver[con_remain], 'remaining_time_for_current_node'] = \
                 matched_itinerary_df[con_remain]['itinerary_segment_dis_list'].map(lambda x: x[0]).values / self.vehicle_speed * 3600
 
-            if self.rl_mode in ["rl_1stage", "matching", "random", "fixed", "greedy", "rl_greedy"]:
-                state_array = None
-                action_array = None
-                reward_array = None
-                next_state_array = None
-                if self.rl_mode in ["random", "greedy", "rl_greedy", "rl_1stage"]:
-                    self.action_collection = np.concatenate((self.action_collection, 
-                                                                    self.driver_table.loc[cor_driver[con_remain], 'matching_radius'].values))
-                if self.rl_mode in ["rl_1stage", "rl_greedy"] :
-                    state_array = np.vstack([self.time + np.zeros(new_matched_requests.shape[0]),
-                                             self.driver_table.loc[cor_driver[con_remain], 'grid_id'].values]).T
-                    if self.adjust_reward_by_radius:
-                        # reward is regularized by radius
-                        reward_array = (new_matched_requests['designed_reward'].values /
-                                        self.driver_table.loc[cor_driver[con_remain], 'matching_radius'].values)
-                    else:
-                        reward_array = new_matched_requests['designed_reward'].values 
-                    action_array = self.driver_table.loc[cor_driver[con_remain], 'action_index'].values
-                    next_state_array = np.vstack([new_matched_requests['t_end'].values,
-                                                  new_matched_requests['dest_grid_id'].values]).T
-                    self.replay_buffer.push(state_array, action_array, reward_array, next_state_array)
+            if self.rl_mode == 'rl' and new_matched_requests.shape[0] > 0:
+                matched_requests = deepcopy(new_matched_requests)
+                def compute_rewards(row):
+                    order_id = row.name  # Since 'order_id' is now the index, use row.name to get it
+                    reward = row['designed_reward']
+                    return self.orders.compute_discounted_rewards(order_id, reward)
+                
+                # Set 'grid_id' as the index
+                matched_requests.set_index('order_id', inplace=True)
+                self.terminal_orders_with_rewards = matched_requests.apply(compute_rewards, axis=1).to_dict()
 
-                elif self.rl_mode == 'matching':
-                    #  rl for matching
-                    # generate transitions
-                    state_array = np.vstack([self.time + np.zeros(new_matched_requests.shape[0]),
-                                             self.driver_table.loc[cor_driver[con_remain], 'grid_id'].values]).T
-                    action_array = np.ones(new_matched_requests.shape[0])
-                    next_state_array = np.vstack([new_matched_requests['t_end'].values,
-                                                  new_matched_requests['dest_grid_id'].values]).T
-                    if self.method in ['sarsa_travel_time', 'sarsa_travel_time_no_subway']:
-                        reward_array = 5000. - new_matched_requests['trip_time'].values
-                    elif self.method in ['sarsa_total_travel_time', 'sarsa_total_travel_time_no_subway']:
-                        reward_array = 5151. - new_matched_requests['pickup_time'].values - new_matched_requests[
-                            'trip_time'].values
-                    else:
-                        # reward_array = new_matched_requests['immediate_reward'].values
-                        # TJ
-                        reward_array = new_matched_requests['designed_reward'].values
-                        # TJ
-                    self.dispatch_transitions_buffer[0] = np.concatenate([self.dispatch_transitions_buffer[0], state_array])
-                    self.dispatch_transitions_buffer[1] = np.concatenate([self.dispatch_transitions_buffer[1], action_array])
-                    self.dispatch_transitions_buffer[2] = np.concatenate(
-                        [self.dispatch_transitions_buffer[2], next_state_array])
-                    self.dispatch_transitions_buffer[3] = np.concatenate([self.dispatch_transitions_buffer[3], reward_array])
+            elif self.rl_mode == 'matching':
+                #  rl for matching
+                # generate transitions
+                state_array = np.vstack([self.time + np.zeros(new_matched_requests.shape[0]),
+                                            self.driver_table.loc[cor_driver[con_remain], 'grid_id'].values]).T
+                action_array = np.ones(new_matched_requests.shape[0])
+                next_state_array = np.vstack([new_matched_requests['t_end'].values,
+                                                new_matched_requests['dest_grid_id'].values]).T
+                if self.method in ['sarsa_travel_time', 'sarsa_travel_time_no_subway']:
+                    reward_array = 5000. - new_matched_requests['trip_time'].values
+                elif self.method in ['sarsa_total_travel_time', 'sarsa_total_travel_time_no_subway']:
+                    reward_array = 5151. - new_matched_requests['pickup_time'].values - new_matched_requests[
+                        'trip_time'].values
+                else:
+                    # reward_array = new_matched_requests['immediate_reward'].values
+                    # TJ
+                    reward_array = new_matched_requests['designed_reward'].values
+                    # TJ
+                self.dispatch_transitions_buffer[0] = np.concatenate([self.dispatch_transitions_buffer[0], state_array])
+                self.dispatch_transitions_buffer[1] = np.concatenate([self.dispatch_transitions_buffer[1], action_array])
+                self.dispatch_transitions_buffer[2] = np.concatenate(
+                    [self.dispatch_transitions_buffer[2], next_state_array])
+                self.dispatch_transitions_buffer[3] = np.concatenate([self.dispatch_transitions_buffer[3], reward_array])
                 #  rl for matching
             # update matched tracks for one time
             # self.wait_requests[]
@@ -560,7 +562,7 @@ class Simulator:
 
         # reposition decision
         # total_idle_time 为reposition间的间隔， time to last both-rg-cruising 为cruising间的间隔。
-        if self.reposition_flag and (self.rl_mode in ["rl_1stage", "matching", "random", "fixed", "greedy", "rl_greedy"]):
+        if self.reposition_flag and (self.rl_mode in ["rl", "matching", "fixed", "greedy", "rl_greedy"]):
             con_eligibe = (self.driver_table['total_idle_time'] > self.eligible_time_for_reposition) & \
                           (self.driver_table['status'] == 0)
             eligible_driver_table = self.driver_table[con_eligibe]
@@ -583,7 +585,7 @@ class Simulator:
                 self.driver_table.loc[eligible_driver_index, 'target_loc_lat'] = lat_array
                 self.driver_table.loc[eligible_driver_index, 'target_grid_id'] = grid_id_array
         if self.cruise_flag:
-            if self.rl_mode in ["rl_1stage", "matching", "random", "fixed", "greedy", "rl_greedy"]:
+            if self.rl_mode in ["rl", "matching", "fixed", "greedy", "rl_greedy"]:
                 con_eligibe = (self.driver_table['time_to_last_cruising'] >= self.max_idle_time) & \
                             (self.driver_table['status'] == 0)
             elif self.rl_mode == 'reposition':
@@ -617,7 +619,7 @@ class Simulator:
                 state_array = np.vstack(
                     [self.time + self.delta_t - self.max_idle_time + np.zeros(grid_id_array.shape[0]),
                      grid_id_array]).T
-                if self.rl_mode in ["rl_1stage", "matching", "random", "fixed", "greedy", "rl_greedy"]:
+                if self.rl_mode in ["rl", "matching", "fixed", "greedy", "rl_greedy"]:
                     remaining_time_array = self.driver_table.loc[eligible_driver_index, 'remaining_time'].values
                 elif self.rl_mode == 'reposition':
                     remaining_time_array = self.driver_table.loc[eligible_driver_index, 'remaining_time'].map(
@@ -789,7 +791,7 @@ class Simulator:
         self.driver_table['current_road_node_index'] = self.driver_table['current_road_node_index'].values.astype(int)
 
         loc_cruise = self.driver_table['status'] == 0
-        if self.rl_mode in ["rl_1stage", "matching", "random", "fixed", "greedy", "rl_greedy"]:
+        if self.rl_mode in ["rl", "matching", "fixed", "greedy", "rl_greedy", "rl"]:
             loc_actually_cruising = loc_cruise & (self.driver_table['remaining_time'] > 0)
         elif self.rl_mode == 'reposition':
             loc_reposition = self.driver_table['status'] == 4
@@ -803,8 +805,6 @@ class Simulator:
         loc_reposition = self.driver_table['status'] == 4
         loc_road_node_transfer = self.driver_table['remaining_time_for_current_node'].values - self.delta_t <= 0
         for order_id,remaining_time in self.driver_table.loc[loc_finished & loc_pickup, ['matched_order_id','remaining_time']].values.tolist():
-            # print(order_id)
-
             self.requests.loc[self.requests['order_id'] == order_id,'pickup_end_time'] = self.time + remaining_time + env_params['delta_t']
 
         for order_id,remaining_time in self.driver_table.loc[loc_finished & loc_delivery, ['matched_order_id','remaining_time']].values.tolist():
@@ -813,13 +813,8 @@ class Simulator:
 
         # for unfinished tasks
         self.driver_table.loc[loc_cruise, 'total_idle_time'] += self.delta_t
-        # greedy matching radius seaching
-        if self.rl_mode == "greedy":
-            self.driver_table.loc[loc_cruise, 'matching_radius'] = (1 + self.driver_table.loc[loc_cruise, 'total_idle_time'] / self.delta_t) * 0.5
-            # maximum radius is 6
-            self.driver_table.loc[self.driver_table['matching_radius'] > 6, 'total_idle_time'] = 0
 
-        if self.rl_mode in ["rl_1stage", "matching", "random", "fixed", "greedy", "rl_greedy"]:
+        if self.rl_mode in ["rl", "matching", "fixed", "greedy", "rl_greedy"]:
             con_real_time_ongoing = loc_unfinished & (loc_cruise | loc_reposition | loc_delivery) | loc_pickup 
         elif self.rl_mode == 'reposition':
             con_real_time_ongoing = loc_unfinished & (loc_cruise | loc_reposition) | loc_pickup
@@ -926,6 +921,13 @@ class Simulator:
             self.driver_table.loc[delivery_finished_driver_index, 'itinerary_segment_dis_list'] = np.array(empty_list + [[-1]], dtype=object)[:-1]
             self.driver_table.loc[delivery_finished_driver_index, 'matched_order_id'] = 'None'
         self.wait_requests['wait_time'] += self.delta_t
+        if self.rl_mode == "greedy":
+            # eligible_update = self.wait_requests['wait_time'] / self.delta_t % 5 == 0
+            # self.wait_requests.loc[eligible_update, 'matching_radius'] = (1 + self.wait_requests['wait_time'] / self.delta_t) * 0.5
+            self.wait_requests['matching_radius'] = (1 + self.wait_requests['wait_time'] / self.delta_t) * 0.5
+            # maximum radius is 6
+            self.wait_requests.loc[self.wait_requests['matching_radius'] > 6.0, 'matching_radius'] = 6.0
+            
         return
 
     def driver_online_offline_update(self):
@@ -957,12 +959,10 @@ class Simulator:
         """
         This function used to run the simulator step by step
         """
-        pr = cProfile.Profile()
-        pr.enable()
         # Step 1: order dispatching
         wait_requests = deepcopy(self.wait_requests)
         driver_table = deepcopy(self.driver_table)
-        if self.rl_mode in ["rl_1stage", "random", "greedy", "rl_greedy"]:
+        if self.rl_mode in ["rl", "greedy", "rl_greedy"]:
             matched_pair_actual_indexes, matched_itinerary = order_dispatch_radius(wait_requests, driver_table, 
                                            self.dispatch_method, self.method, self.adjust_reward_by_radius)
         elif self.rl_mode == "fixed":
@@ -1016,16 +1016,7 @@ class Simulator:
 
         # Step 7: update time
         self.update_time()
-        pr.disable()
       
-        # Save stats to a file
-        pr.dump_stats('profile_output.pstats')
-        with open('profile_output.txt', 'w') as f:
-            ps = pstats.Stats(pr, stream=f) 
-            sortby = 'cumulative'
-            ps.strip_dirs().sort_stats(sortby).print_stats()
-
-
     def step1(self): # rl for repositioning
         # Step 1: bipartite matching
         wait_requests = deepcopy(self.wait_requests)
@@ -1070,3 +1061,10 @@ class Simulator:
         self.update_time()
 
         return
+    
+    def get_demand_supply(self):
+        # Group by grid_id and count the records in driver dataframe
+        idle_drivers = self.driver_table[(self.driver_table['status'] == 0) | (self.driver_table['status'] == 4)]
+        self.idle_drivers_per_grid = idle_drivers.groupby('grid_id').size()
+        # Group by 'grid_id' in wait_requests to count the num_open_order_per_grid
+        self.open_orders_per_grid = self.wait_requests.groupby('origin_id').size()

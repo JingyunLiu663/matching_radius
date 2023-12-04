@@ -101,7 +101,7 @@ direction4_available_list = [] # right
 centroid_lng_list = []
 centroid_lat_list = []
 
-if env_params['rl_mode'] == "matching" or env_params['rl_mode'] == "rl_1stage":
+if env_params['rl_mode'] == "matching" or env_params['rl_mode'] == "rl":
     for i in range(side**2):
 
         centroid_lng_list.append(result[result['grid_id']==i]['lng'])
@@ -699,18 +699,18 @@ def order_dispatch_radius(wait_requests, driver_table, dispatch_method='LD',meth
     if num_wait_request > 0 and num_idle_driver > 0:
         if dispatch_method == 'LD':
             # generate order driver pairs and corresponding itinerary
-            request_array_temp = wait_requests.loc[:, ['origin_lng', 'origin_lat', 'order_id', 'weight']]
+            request_array_temp = wait_requests.loc[:, ['origin_lng', 'origin_lat', 'order_id', 'weight', 'matching_radius']]
             request_array = np.repeat(request_array_temp.values, num_idle_driver, axis=0)
-            driver_loc_array_temp = idle_driver_table.loc[:, ['lng', 'lat', 'driver_id', 'matching_radius']]
+            driver_loc_array_temp = idle_driver_table.loc[:, ['lng', 'lat', 'driver_id']]
             driver_loc_array = np.tile(driver_loc_array_temp.values, (num_wait_request, 1))
             dis_array = distance_array(request_array[:, :2], driver_loc_array[:, :2])
-            # TODO: compare the distance with matching radius for each idle driver 
-            flag = np.where(dis_array <= driver_loc_array[:, 3])[0]
+            # compare the distance with matching radius for each idle driver 
+            flag = np.where(dis_array <= request_array[:, 4])[0]
             if len(flag) > 0:
                 if adjust_reward_by_radius:
                     # adjust reward by radius
                     order_driver_pair = np.vstack(
-                        [request_array[flag, 2], driver_loc_array[flag, 2], request_array[flag, 3] / driver_loc_array[flag, 3], dis_array[flag]]).T
+                        [request_array[flag, 2], driver_loc_array[flag, 2], request_array[flag, 3] / request_array[flag, 4], dis_array[flag]]).T
                 else:
                     order_driver_pair = np.vstack(
                         [request_array[flag, 2], driver_loc_array[flag, 2], request_array[flag, 3], dis_array[flag]]).T
@@ -727,14 +727,6 @@ def order_dispatch_radius(wait_requests, driver_table, dispatch_method='LD',meth
                 driver_loc_array_new = np.array(driver_loc_array_temp.loc[driver_indexs_new])[:,:2]
                 itinerary_node_list, itinerary_segment_dis_list, dis_array = route_generation_array(
                     driver_loc_array_new, request_array_new, mode=env_params['pickup_mode'])
-                # itinerary_node_list_new = []
-                # itinerary_segment_dis_list_new = []
-                # dis_array_new = []
-                # for item in matched_pair_actual_indexs:
-                #     index = int(item[3])
-                #     itinerary_node_list_new.append(itinerary_node_list[index])
-                #     itinerary_segment_dis_list_new.append(itinerary_segment_dis_list[index])
-                #     dis_array_new.append(dis_array[index])
 
                 matched_itinerary = [itinerary_node_list, itinerary_segment_dis_list, dis_array]
     return matched_pair_actual_indexs, np.array(matched_itinerary)
@@ -787,14 +779,6 @@ def order_dispatch(wait_requests, driver_table, maximal_pickup_distance=1, dispa
                 driver_loc_array_new = np.array(driver_loc_array_temp.loc[driver_indexs_new])[:,:2]
                 itinerary_node_list, itinerary_segment_dis_list, dis_array = route_generation_array(
                     driver_loc_array_new, request_array_new, mode=env_params['pickup_mode'])
-                # itinerary_node_list_new = []
-                # itinerary_segment_dis_list_new = []
-                # dis_array_new = []
-                # for item in matched_pair_actual_indexs:
-                #     index = int(item[3])
-                #     itinerary_node_list_new.append(itinerary_node_list[index])
-                #     itinerary_segment_dis_list_new.append(itinerary_segment_dis_list[index])
-                #     dis_array_new.append(dis_array[index])
 
                 matched_itinerary = [itinerary_node_list, itinerary_segment_dis_list, dis_array]
     return matched_pair_actual_indexs, np.array(matched_itinerary)
@@ -920,21 +904,52 @@ class State:
         return f"({self.time_slice}, {self.grid_id})"
 # rl for matching
 
+class OrderTrajectory:
+    '''
+    map order_id to order trajectory - list of tuple(state, action, next_state)
+    '''
+    def __init__(self, gamma=0.9):
+        self.trajectories = {}
+        self.gamma = gamma
+
+    def compute_discounted_rewards(self, order_id, reward):
+        '''
+        order_id is used as the unique identifier
+        reward is the final reward recorded at the terminal state
+        '''
+        discounted_rewards = deque()
+        trajectory = self.trajectories[order_id]
+        # spread the final reward along the trajectory
+        time_intervals = len(trajectory)
+        Gt = reward / time_intervals
+        # traverse the trajectory from back to front
+        for _ in range(time_intervals):
+            discounted_rewards.appendleft(Gt)
+            Gt = Gt * self.gamma
+        # convert deque back into list - time complexity O(n)
+        return list(discounted_rewards)
+    
 
 class ReplayBuffer:
-    def __init__(self, capacity):
-        self.buffer = deque(maxlen=capacity)
+    def __init__(self):
+        self.buffer = []
 
-    def push(self, states, actions, rewards, next_states):
-        for s, a, r, ns in zip(states, actions, rewards, next_states):
-            self.buffer.append((s, a, r, ns))
+    def push(self, transition):
+        '''
+        trajectory is a list of tuples (state, action, next_state)
+        discounted_rewards is a list of float 
+        '''
+        self.buffer.append(transition)
 
     def sample(self, batch_size):
-        '''
-        without replacement
-        '''
-        state, action, reward, next_state = zip(*random.sample(self.buffer, batch_size))
-        return np.array(state).astype(np.float32), np.array(action).astype(np.int32), np.array(reward).astype(np.float32), np.array(next_state).astype(np.float32)
+        # Sample batch_size number of indices from range of buffer length
+        indices = np.random.choice(range(len(self.buffer)), size=batch_size, replace=False)
+        
+        # Using the indices, convert the corresponding transitions to numpy arrays and split into separate arrays
+        states, actions, rewards, next_states, done = zip(*np.array(self.buffer)[indices])
+        
+        return np.array(states), np.array(actions), np.array(rewards), np.array(next_states), np.array(done)
+      
 
     def __len__(self):
         return len(self.buffer)
