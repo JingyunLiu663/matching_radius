@@ -66,12 +66,12 @@ class DDqnAgent:
         Action: matching radius applied (km)
     """
 
-    def __init__(self, action_space: list, num_layers: int, layers_dimension_list: list, lr=5e-4, gamma=0.99,
-                 epsilon=1.0, eps_min=0.01, eps_dec=0.9978, target_replace_iter=2000, experiment_mode="train", adjust_reward=0, rl_mode="rl_1stage"):
+    def __init__(self, action_space: list, num_layers: int, layers_dimension_list: list, input_dims, lr=5e-4, gamma=0.99,
+                 epsilon=1.0, eps_min=0.01, eps_dec=0.9978, target_replace_iter=2000, experiment_mode="train", adjust_reward=0, radius_method="rl"):
         self.num_actions = len(action_space)
         self.num_layers = num_layers
         self.layers_dimension_list = layers_dimension_list
-        self.input_dims = 2  # (grid_id, time_slice)
+        self.input_dims = input_dims  # (grid_id, time_slice)
         self.lr = lr
         self.gamma = gamma
         self.epsilon = epsilon
@@ -95,38 +95,38 @@ class DDqnAgent:
         current_time = datetime.now().strftime('%b%d_%H-%M-%S')
         if self.experiment_mode == "train":
             # Create a SummaryWriter object and specify the log directory
-            train_log_dir = f"runs/train/ddqn_{rl_mode}_{adjust_reward}_{current_time}"
+            train_log_dir = f"runs/train/{radius_method}/ddqn_{adjust_reward}_{current_time}"
             self.train_writer = SummaryWriter(train_log_dir)
             hparam_dict = {'lr': self.lr, 'gamma': self.gamma, 'epsilon': self.epsilon, 'eps_min': self.eps_min, 'eps_dec': self.eps_dec, 'target_replace_iter': self.target_replace_iter}
             self.train_writer.add_hparams(hparam_dict, {})
             self.train_writer.close()
         elif self.experiment_mode == "test":
-            test_log_dir = f"runs/test/ddqn_{rl_mode}_{adjust_reward}_{current_time}"
+            test_log_dir = f"runs/test/{radius_method}/ddqn_{adjust_reward}_{current_time}"
             self.test_writer = SummaryWriter(test_log_dir)
 
-    def choose_action(self, states: np.array):
+    def choose_action(self, state):
         """
         Choose action based on epsilon-greedy algorithm
-        :param states: numpy array of shape n * 2
-        :return: numpy array of action index
+        :param state: a tuple representing the state
+        :return: an integer representing the action index
         """
-        n = states.shape[0]
-        # Convert all observations to a tensor
-        state_tensor = torch.tensor(states, dtype=torch.float32).to(device)
-        # Compute Q-values for all states in one forward pass
+        # Convert the state to a tensor
+        state_tensor = torch.tensor([state], dtype=torch.float32).to(device)
+        
+        # Compute Q-values for the state
         with torch.no_grad():
             q_values = self.eval_net(state_tensor)
-        # Default action selection is greedy
-        action_indices = torch.argmax(q_values, dim=1).cpu().numpy()
-        if self.experiment_mode == "train":
-            # Identify agents that should explorde
-            explorers = np.random.random(n) < self.epsilon
-            # Generate random actions for explorers
-            action_indices[explorers] = np.random.randint(self.num_actions, size=np.sum(explorers))
         
-        return action_indices
+        # Default action selection is greedy
+        action_index = torch.argmax(q_values).item()
+        
+        if self.experiment_mode == "train" and np.random.random() < self.epsilon:
+            # Exploration: select a random action
+            action_index = np.random.randint(self.num_actions)
 
-    def learn(self, states, action_indices, rewards, next_states):
+        return action_index
+
+    def learn(self, states, action_indices, rewards, next_states, done):
 
         # update the target network parameter
         if self.eval_net_update_times % self.target_replace_iter == 0:
@@ -137,6 +137,7 @@ class DDqnAgent:
         action_batch = torch.tensor(action_indices, dtype=torch.int64).to(device)
         reward_batch = torch.tensor(rewards, dtype=torch.float32).to(device)
         new_state_batch = torch.tensor(next_states, dtype=torch.float32).to(device)
+        done_batch = torch.tensor(done, dtype=torch.bool).to(device)
 
         # RL learn by batch
         q_eval = self.eval_net(state_batch)[np.arange(BATCH_SIZE), action_batch]
@@ -147,6 +148,8 @@ class DDqnAgent:
         
         # Then we use this action to compute the Q-value from the target network for the next state
         q_next = self.target_net(new_state_batch)[np.arange(BATCH_SIZE), next_action_batch]
+        # Set q_next to 0 for terminal states
+        q_next[done_batch] = 0.0
         q_target = (reward_batch + self.gamma * q_next.detach())
 
         # calculate loss and do the back-propagation

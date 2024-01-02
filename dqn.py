@@ -63,7 +63,7 @@ class DqnAgent:
     """
 
     def __init__(self, action_space: list, num_layers: int, layers_dimension_list: list, input_dims=2, lr=5e-4, gamma=0.99,
-                 epsilon=1.0, eps_min=0.01, eps_dec=0.9978, target_replace_iter=2000, experiment_mode="train", adjust_reward=0, rl_mode="rl_1stage"):
+                 epsilon=1.0, eps_min=0.01, eps_dec=0.9978, target_replace_iter=2000, experiment_mode="train", adjust_reward=0, radius_method="rl"):
         self.num_actions = len(action_space)
         self.num_layers = num_layers
         self.layers_dimension_list = layers_dimension_list
@@ -90,14 +90,14 @@ class DqnAgent:
         current_time = datetime.now().strftime('%b%d_%H-%M-%S')
         if self.experiment_mode == "train":
             # Create a SummaryWriter object and specify the log directory
-            train_log_dir = f"runs/{rl_mode}/train/dqn_{current_time}"
+            train_log_dir = f"runs/train/{radius_method}/dqn_{adjust_reward}_{current_time}"
             self.train_writer = SummaryWriter(train_log_dir)
             hparam_dict = {'lr': self.lr, 'gamma': gamma, 'epsilon': self.epsilon, 'eps_min': self.eps_min, 'eps_dec': self.eps_dec, 'target_replace_iter': self.target_replace_iter}
             self.train_writer.add_hparams(hparam_dict, {})
             self.train_writer.close()
             print("train writer created!")
         elif self.experiment_mode == "test":
-            test_log_dir = f"runs/{rl_mode}/test/dqn_{current_time}"
+            test_log_dir = f"runs/test/{radius_method}/dqn_{adjust_reward}_{current_time}"
             self.test_writer = SummaryWriter(test_log_dir)
             print("test writer created!")
 

@@ -10,195 +10,201 @@ from config import *
 import math
 import pickle
 import osmnx as ox
+import geopandas as gpd
+from shapely.geometry import Point, Polygon
 from tqdm import tqdm
 import pandas as pd
 import sys
 from collections import Counter
 import pymongo
+from pymongo.errors import ConnectionFailure
 import time
 import scipy.stats as st
 from scipy.stats import skewnorm
 from collections import deque
-import cProfile
+
 """
-Here, we load the information of graph network from graphml file.
+Connect to mongoDB to speed up access to road network information
+"""
+myclient = pymongo.MongoClient("mongodb://localhost:27019/") # Use port: 27019
+try:
+    # The ismaster command is cheap and does not require auth.
+    myclient.admin.command('ismaster')
+    print("MongoDB is connected!")
+except ConnectionFailure:
+    print("Server not available")
+mydb = myclient["route_network"]
+mycollection = mydb['manhattan_island_only']
+
+"""
+Load the information of graph network from graphml file.
+Filter out the area of interest (Manhattan)
 """
 G = ox.load_graphml('./input/graph.graphml')
-gdf_nodes, gdf_edges = ox.graph_to_gdfs(G)
-lat_list = gdf_nodes['y'].tolist()
-lng_list = gdf_nodes['x'].tolist()
-node_id = gdf_nodes.index.tolist()
-node_id_to_lat_lng = {}
-node_coord_to_id = {}
-for i in range(len(lat_list)):
-    node_id_to_lat_lng[node_id[i]] = (lat_list[i], lng_list[i])
-    node_coord_to_id[(lng_list[i], lat_list[i])] = node_id[i]
+gdf_nodes, _ = ox.graph_to_gdfs(G)
 
-center = (
-(env_params['east_lng'] + env_params['west_lng']) / 2, (env_params['north_lat'] + env_params['south_lat']) / 2)
-radius = max(abs(env_params['east_lng'] - env_params['west_lng']) / 2,
-             abs(env_params['north_lat'] - env_params['south_lat']) / 2)
-side = env_params['side']
-interval = 2 * radius / side
+# filter out Manhattan area
+manhattan_polygon = ox.geocode_to_gdf('Manhattan, New York, USA')
+nodes_geo = gpd.GeoDataFrame(gdf_nodes, geometry=[Point(xy) for xy in zip(gdf_nodes['x'], gdf_nodes['y'])])
+nodes_in_manhattan = gpd.sjoin(nodes_geo, manhattan_polygon, how="inner", predicate='intersects')
 
+# Extract the node IDs that are within the Manhattan polygon
+manhattan_node_ids = nodes_in_manhattan.index.tolist()
+# Create a subgraph of G that only contains nodes within Manhattan
+G_manhattan = G.subgraph(manhattan_node_ids)
 
+# map id to coordinate; map coordinate to node_id
+node_id_to_coord = pd.Series(nodes_in_manhattan[['x', 'y']].apply(tuple, axis=1), index=nodes_in_manhattan.index).to_dict()
+node_coord_to_id = {value: key for key, value in node_id_to_coord.items()}
 
+# Extract 'node_id', 'lat' and 'lng' values
+lng_list = nodes_in_manhattan['x'].tolist()
+lat_list = nodes_in_manhattan['y'].tolist()
+node_list = nodes_in_manhattan.index
 
 """
-Here, we build the connection to mongodb, which will be used to speed up access to road network information.
+A dataframe `result` is generated to map coordinates to grid_id
 """
-myclient = pymongo.MongoClient("mongodb://localhost:27017/")
-mydb = myclient["route_network"]
-   
-mycollect = mydb['route_list']
-print("collection created")
+# Read NYC Neighborhood Tabulation Area (NTA) data
+nta = gpd.read_file('input_generation/nynta2020_23d/nynta2020.shp')
+# Convert the CRS of the NTA data to match the osmnx graph
+nta = nta.to_crs("EPSG:4326")
+# Filter Manhattan neighborhoods
+manhattan_nta = nta[nta['BoroName'] == 'Manhattan']
+# Create a mapping from neighborhood names to unique integers
+unique_neighborhoods = manhattan_nta['NTAName'].unique()
+neighborhood_to_id = {neighborhood: i for i, neighborhood in enumerate(unique_neighborhoods)}
+# Create a reverse mapping from ID to neighborhood name
+id_to_neighborhood = {v: k for k, v in neighborhood_to_id.items()}
 
-# define the function to get zone_id of segment node
-def get_zone(lat, lng):
-    """
-    :param lat: the latitude of coordinate
-    :type : float
-    :param lng: the longitude of coordinate
-    :type lng: float
-    :return: the id of zone that the point belongs to
-    :rtype: float
-    """
-    if lat < center[1]:
-        i = math.floor(side / 2) - math.ceil((center[1] - lat) / interval) + side % 2
-    else:
-        i = math.floor(side / 2) + math.ceil((lat - center[1]) / interval) - 1
+def assign_neighborhood_ids_array(lng_series, lat_series, manhattan_nta, neighborhood_to_id):
+    '''
+    Assign neighborhood IDs to a series of longitude and latitude coordinates.
 
-    if lng < center[0]:
-        j = math.floor(side / 2) - math.ceil((center[0] - lng) / interval) + side % 2
-    else:
-        j = math.floor(side / 2) + math.ceil((lng - center[0]) / interval) - 1
-    return i * side + j
+    Parameters:
+    - lng_series: pandas.Series containing longitude values
+    - lat_series: pandas.Series containing latitude values
+    - manhattan_nta: GeoDataFrame representing Manhattan neighborhoods
+    - neighborhood_to_id: Dictionary mapping neighborhood names to IDs
 
+    Returns:
+    - A pandas.Series containing the assigned neighborhood IDs
+    '''
+    # Check if lng and lat series are of same length
+    if len(lng_series) != len(lat_series):
+        raise ValueError("Longitude and latitude series must be of the same length.")
 
+    # Create Point objects from the longitude and latitude pairs
+    points = gpd.GeoSeries([Point(x, y) for x, y in zip(lng_series, lat_series)], crs="EPSG:4326")
+
+    # Create a GeoDataFrame from the points GeoSeries
+    points_gdf = gpd.GeoDataFrame(geometry=points)
+
+    # Spatially join the points GeoDataFrame and the neighborhood GeoDataFrame
+    joined_gdf = gpd.sjoin(points_gdf, manhattan_nta, how="left", predicate='within')
+
+    # Map the neighborhood names to IDs using the neighborhood_to_id dictionary
+    # If NTAName does not exist in neighborhood_to_id, it returns NaN
+    joined_gdf['grid_id'] = joined_gdf['NTAName'].map(neighborhood_to_id)
+
+    # Handle points outside any neighborhood by setting their ID to -1
+    joined_gdf['grid_id'] = joined_gdf['grid_id'].fillna(-1).astype(int)
+
+    # Return the series of grid_ids
+    return joined_gdf['grid_id'].reset_index(drop=True)
+
+def assign_neighborhood_ids(lng, lat, manhattan_nta=manhattan_nta, neighborhood_to_id=neighborhood_to_id):
+    '''
+    '''
+    # Create a Point object from the (latitude, longitude) pair
+    point = Point(lng, lat)
+
+    # Create a GeoDataFrame with the Point object
+    point_gdf = gpd.GeoDataFrame([{'geometry': point}], crs="EPSG:4326")
+
+    # Spatially join the points GeoDataFrame and the neighborhood GeoDataFrame
+    joined_gdf = gpd.sjoin(point_gdf, manhattan_nta, how="left", predicate='within')
+
+    # Map the neighborhood names to IDs using the neighborhood_to_id dictionary
+    # If NTAName does not exist in neighborhood_to_id, it returns NaN
+    joined_gdf['grid_id'] = joined_gdf['NTAName'].map(neighborhood_to_id)
+
+    # Handle points outside any neighborhood by setting their ID to -1
+    joined_gdf['grid_id'] = joined_gdf['grid_id'].fillna(-1).astype(int)
+
+    # Return the grid_id for the single point, which should be a scalar integer
+    return joined_gdf['grid_id'].iloc[0]
+    
 result = pd.DataFrame()
 nodelist = []
 result['lat'] = lat_list
 result['lng'] = lng_list
-result['node_id'] = gdf_nodes.index.tolist()
-for i in range(len(result)):
-    nodelist.append(get_zone(lat_list[i], lng_list[i]))
-result['grid_id'] = nodelist
+result['node_id'] = node_list
+# Assign neighborhood IDs to all points at once
+result['grid_id'] = assign_neighborhood_ids_array(result['lng'], result['lat'], manhattan_nta, neighborhood_to_id)
+# Create a mapping of grid_id to the first (lng, lat) entry
+grid_id_to_first_coords = result.groupby('grid_id').first()[['lng', 'lat']].to_dict('index')
+# Convert nested dictionary to a simpler dictionary
+grid_id_to_first_coords = {grid: (coords['lng'], coords['lat']) for grid, coords in grid_id_to_first_coords.items()}
+with open("input_generation/adjacent_neighbour_dict.pickle", "rb") as f:
+    grid_adjacency = pickle.load(f)
 
 
-"""Generate the available directions for each grid"""
-df_available_directions = pd.DataFrame(columns=['zone_id','direction_0','direction_1','direction_2','direction_3','direction_4'])
-df_neighbor_centroid = pd.DataFrame()
-direction_1_list = []   # up
-direction_2_list = []   # down
-direction_3_list = []   # left
-direction_4_list = []   # right
+"""
+Generate the available directions for each grid
+"""
+# Initialize the DataFrame with the required columns
+df_available_directions = pd.DataFrame(columns=['zone_id', 'direction_0', 'direction_1', 'direction_2', 'direction_3', 'direction_4'])
+# Calculate the centroid for each NTA
+manhattan_nta['centroid'] = manhattan_nta.geometry.centroid
+nta_centroids = manhattan_nta.set_index('NTAName')['centroid'].to_dict()
 
-direction0_available_list = [i for i in range(side**2)] # stay
-direction1_available_list = [] # up
-direction2_available_list = [] # down
-direction3_available_list = [] # left
-direction4_available_list = [] # right
-centroid_lng_list = []
-centroid_lat_list = []
+# Iterate over each NTA to determine the available directions
+zone_id = []
+centroid_lng = []
+centroid_lat = []
+up = [1, 3, 0, 4, 11, 9, 7, 8, 14, 10, 18, 12, 22, 15, 15, 16, 21, 16, 19, 20, 24, 23, 29, 29, 25, 26, 32, 28, 35, 30, 30, 31, 33, 36, 36, 34, 36, 27]
+down = [2, 0, 2, 1, 3, 3, 0, 6, 7, 5, 9, 4, 11, 8, 8, 14, 15, 15, 10, 18, 19, 16, 16, 21, 20, 24, 25, 20, 27, 22, 29, 31, 26, 32, 33, 28, 33, 12]
+left = [0, 1, 2, 3, 5, 5, 1, 3, 4, 9, 10, 9, 10, 14, 11, 12, 12, 16, 18, 19, 20, 22, 37, 22, 24, 25, 26, 24, 25, 27, 27, 31, 32, 33, 36, 32, 36, 19]
+right = [0, 6, 2, 7, 8, 4, 6, 7, 8, 11, 12, 14, 16, 13, 13, 15, 17, 17, 37, 37, 37, 21, 21, 23, 27, 28, 28, 30, 30, 29, 30, 31, 35, 35, 34, 35, 34, 22]
+up_b = []
+down_b = []
+left_b = []
+right_b = []
 
-if env_params['rl_mode'] == "matching" or env_params['rl_mode'] == "rl":
-    for i in range(side**2):
-
-        centroid_lng_list.append(result[result['grid_id']==i]['lng'])
-        centroid_lat_list.append(result[result['grid_id']==i]['lat'])
-        # up
-        if math.floor(i / side) == 0:
-            direction_1_list.append(0)
-            direction1_available_list.append(np.nan)
-        else:
-            direction_1_list.append(1)
-            direction1_available_list.append(i-side)
-
-
-        # down
-        if math.floor(i / side) == side - 1:
-            direction_2_list.append(0)
-            direction2_available_list.append(np.nan)
-        else:
-            direction_2_list.append(1)
-            direction2_available_list.append(i + side)
-
-
-
-        # left
-        if i % side == 0:
-            direction_3_list.append(0)
-            direction3_available_list.append(np.nan)
-        else:
-            direction_3_list.append(1)
-            direction3_available_list.append(i-1)
-
-        # right
-        if i % side == side -1:
-            direction_4_list.append(0)
-            direction4_available_list.append(np.nan)
-        else:
-            direction_4_list.append(1)
-            direction4_available_list.append(i+1)
-elif env_params['rl_mode'] == "reposition":
-    for i in range(side**2):
-        if len(result[result['grid_id']==i]['lng'].values.tolist()) == 0:
-            centroid_lng_list.append(lng_list[0])
-            centroid_lat_list.append(lat_list[0])
-        else:
-            centroid_lng_list.append(result[result['grid_id']==i]['lng'].values.tolist()[0])
-            centroid_lat_list.append(result[result['grid_id']==i]['lat'].values.tolist()[0])
-        # up
-        if math.floor(i / side) == 0 and len(result[result['grid_id']==i-side]['lng'].values.tolist()) == 0:
-            direction_1_list.append(0)
-            direction1_available_list.append(i)
-        else:
-            direction_1_list.append(1)
-            direction1_available_list.append(i-side)
-
-
-        # down
-        if math.floor(i / side) == side - 1 and len(result[result['grid_id']==i+side]['lng'].values.tolist()) == 0:
-            direction_2_list.append(0)
-            direction2_available_list.append(i)
-        else:
-            direction_2_list.append(1)
-            direction2_available_list.append(i + side)
-
-
-
-        # left
-        if i % side == 0 and len(result[result['grid_id']==i-1]['lng'].values.tolist()) == 0:
-            direction_3_list.append(0)
-            direction3_available_list.append(i)
-        else:
-            direction_3_list.append(1)
-            direction3_available_list.append(i-1)
-
-        # right
-        if i % side == side -1 and len(result[result['grid_id']==i+1]['lng'].values.tolist()) == 0:
-            direction_4_list.append(0)
-            direction4_available_list.append(i)
-        else:
-            direction_4_list.append(1)
-            direction4_available_list.append(i+1)
-
-df_available_directions['zone_id'] = [i for i in range(side**2)]
-df_available_directions['direction_0'] = 1
-df_available_directions['direction_1'] = direction_1_list
-df_available_directions['direction_2'] = direction_2_list
-df_available_directions['direction_3'] = direction_3_list
-df_available_directions['direction_4'] = direction_4_list
-
-df_neighbor_centroid['zone_id'] = direction0_available_list
-df_neighbor_centroid['centroid_lng'] = centroid_lng_list
-df_neighbor_centroid['centroid_lat'] = centroid_lat_list
-df_neighbor_centroid['stay'] = direction0_available_list
-df_neighbor_centroid['up'] = direction1_available_list
-df_neighbor_centroid['right'] = direction4_available_list
-df_neighbor_centroid['down'] = direction2_available_list
-df_neighbor_centroid['left'] = direction3_available_list
-
+for id in range(len(unique_neighborhoods)):
+    zone_id.append(id)
+    current_nta_name = id_to_neighborhood[id]
+    current_centroid = nta_centroids[current_nta_name]
+    centroid_lng.append(current_centroid.x)
+    centroid_lat.append(current_centroid.y)
+    up_b.append(1 if up[id] != id else 0)
+    down_b.append(1 if down[id] != id else 0)
+    left_b.append(1 if left[id] != id else 0)
+    right_b.append(1 if right[id] != id else 0)
+        
+# Create the DataFrame after the loop
+df_neighbor_centroid = pd.DataFrame({
+        'zone_id': zone_id,
+        'centroid_lng': centroid_lng,  # Assuming x is longitude
+        'centroid_lat': centroid_lat,  # Assuming y is latitude
+        'stay': zone_id,  # Stay in the same NTA
+        'up': up,         # Up
+        'down': down,     # Down
+        'left': left,     # Left
+        'right': right    # Right
+    })
+df_neighbor_centroid['zone_id'] = df_neighbor_centroid['zone_id'].astype(int)
+direction_0 = [1] * len(zone_id)
+df_available_directions = pd.DataFrame({
+    'zone_id': zone_id,
+    'direction_0': direction_0,
+    'direction_1': up_b,         # Up
+    'direction_2': down_b,     # Down
+    'direction_3': left_b,     # Left
+    'direction_4': right_b    # Right
+}
+)
 
 # rl for matching
 def get_exponential_epsilons(initial_epsilon, final_epsilon, steps, decay=0.99, pre_steps=10):
@@ -360,57 +366,56 @@ def route_generation_array(origin_coord_array, dest_coord_array, mode='rg'):
     # itinerary_node_list的每一项为一个list，包含了对应路线中的各个节点编号
     # itinerary_segment_dis_list的每一项为一个array，包含了对应路线中的各节点到相邻下一节点的距离
     # dis_array包含了各行程的总里程
-    origin_node_list = get_nodeId_from_coordinate(origin_coord_array[:, 0], origin_coord_array[:, 1])
+    origin_node_list = get_nodeId_from_coordinate(origin_coord_array[:, 0], origin_coord_array[:, 1]) # a list
     dest_node_list = get_nodeId_from_coordinate(dest_coord_array[:, 0], dest_coord_array[:, 1])
     itinerary_node_list = []
     itinerary_segment_dis_list = []
     dis_array = []
+
     if mode == 'ma':     
         for origin, dest in zip(origin_node_list, dest_node_list):
             itinerary_node_list.append([dest])
-            dis = distance(node_id_to_lat_lng[origin], node_id_to_lat_lng[dest])
+            dis = distance(node_id_to_coord[origin], node_id_to_coord[dest])
             itinerary_segment_dis_list.append([dis])
             dis_array.append(dis)
         return itinerary_node_list, itinerary_segment_dis_list, np.array(dis_array)
 
     if mode == 'rg':
-        # 返回完整itinerary
-        for origin,dest in zip(origin_node_list,dest_node_list):
-            data = {
-                'node': str(origin) + str(dest)
+        # return itinerary with origin and destination nodes
+        for origin, dest in zip(origin_node_list, dest_node_list):
+            query = {
+                'origin': origin,
+                'destination': dest
             }
-            re = mycollect.find_one(data)
+            re = mycollection.find_one(query)
             if re:
-                ite = [int(item) for item in re['itinerary_node_list'].strip('[').strip(']').split(', ')]
+                ite = re['itinerary_node_list']
             else:
-                ite = ox.distance.shortest_path(G, origin, dest, weight='length', cpus=16)
+                ite = ox.distance.shortest_path(G_manhattan, origin, dest, weight='length', cpus=64)
                 if ite is None:
                     ite = [origin, dest]
                 content = {
-                    'node': str(origin) + str(dest),
-                    'itinerary_node_list': str(ite)
+                    'origin': origin,
+                    'destination': dest,
+                    'itinerary_node_list': ite
                 }
                 try:
-                    mycollect.insert_one(content)
+                    mycollection.insert_one(content)
                 except Exception as e:
-                    print(f"Error inserting data for {str(origin) + str(dest)}: {e}")
+                    print(f"Error inserting data for origin: {origin}, destination: {dest}: {e}")
             if ite is not None and len(ite) > 1:
                 itinerary_node_list.append(ite)
             else:
-                itinerary_node_list.append([origin,dest])
-        # itinerary_node_list = ox.distance.shortest_path(G, origin_node_list, dest_node_list, weight='length', cpus=16)
+                itinerary_node_list.append([origin, dest])
+        
         for itinerary_node in itinerary_node_list:
-
             if itinerary_node is not None:
                 itinerary_segment_dis = []
                 for i in range(len(itinerary_node) - 1):
-                    # dis = nx.shortest_path_length(G, node_id_to_lat_lng[itinerary_node[i]], node_id_to_lat_lng[itinerary_node[i + 1]], weight='length')
-
-                    dis = distance(node_id_to_lat_lng[itinerary_node[i]], node_id_to_lat_lng[itinerary_node[i + 1]])
+                    dis = distance(node_id_to_coord[itinerary_node[i]], node_id_to_coord[itinerary_node[i + 1]])
                     itinerary_segment_dis.append(dis)
                 dis_array.append(sum(itinerary_segment_dis))
                 itinerary_segment_dis_list.append(itinerary_segment_dis)
-            itinerary_node.pop()
 
         # a toy example
         # for i in range(origin_coord_array.shape[0]):
@@ -449,11 +454,11 @@ def route_generation_array(origin_coord_array, dest_coord_array, mode='rg'):
             # data = {
             #     'node': str(origin)+str(dest)
             # }
-            # re = mycollect.find_one(data)['itinerary_node_list']
+            # re = mycollection.find_one(data)['itinerary_node_list']
             # if re:
             #     ite = re
             # else:
-            ite = ox.distance.shortest_path(G, origin, dest, weight='length', cpus=16)
+            ite = ox.distance.shortest_path(G_manhattan, origin, dest, weight='length', cpus=16)
             if ite is not None and len(ite) > 1:
                 itinerary_node_list.append(ite)
             else:
@@ -462,9 +467,9 @@ def route_generation_array(origin_coord_array, dest_coord_array, mode='rg'):
         for itinerary_node in itinerary_node_list:
             itinerary_segment_dis = []
             for i in range(len(itinerary_node) - 1):
-                # dis = nx.shortest_path_length(G, node_id_to_lat_lng[itinerary_node[i]], node_id_to_lat_lng[itinerary_node[i + 1]], weight='length')
+                # dis = nx.shortest_path_length(G, node_id_to_coord[itinerary_node[i]], node_id_to_coord[itinerary_node[i + 1]], weight='length')
                 try:
-                    dis = distance(node_id_to_lat_lng[itinerary_node[i]], node_id_to_lat_lng[itinerary_node[i + 1]])
+                    dis = distance(node_id_to_coord[itinerary_node[i]], node_id_to_coord[itinerary_node[i + 1]])
                 except:
                     print("itinerary exception")
            
@@ -476,8 +481,7 @@ def route_generation_array(origin_coord_array, dest_coord_array, mode='rg'):
             #     print(itinerary_segment_dis)
             itinerary_segment_dis_list.append(itinerary_segment_dis)
 
-    dis_array = np.array(dis_array)
-    return itinerary_node_list, itinerary_segment_dis_list, dis_array
+    return itinerary_node_list, itinerary_segment_dis_list, np.array(dis_array)
 
 class road_network:
 
@@ -563,7 +567,7 @@ def sample_all_drivers(driver_info, t_initial, t_end, driver_sample_ratio=1, dri
     new_driver_info = deepcopy(driver_info)
     sampled_driver_info = new_driver_info.sample(frac=driver_sample_ratio)
     sampled_driver_info['status'] = 3
-    loc_con = sampled_driver_info['start_time'] <= t_initial
+    loc_con = (sampled_driver_info['start_time'] >= t_initial) & (sampled_driver_info['start_time'] <= t_end)
     sampled_driver_info.loc[loc_con, 'status'] = 0
     sampled_driver_info['target_loc_lng'] = sampled_driver_info['lng']
     sampled_driver_info['target_loc_lat'] = sampled_driver_info['lat']
@@ -601,7 +605,7 @@ def sample_request_num(t_mean, std, delta_t):
 
 
 
-def reposition(eligible_driver_table, mode):
+def reposition(eligible_driver_table):
     """
     :param eligible_driver_table:
     :type eligible_driver_table:
@@ -610,66 +614,56 @@ def reposition(eligible_driver_table, mode):
     :return:
     :rtype:
     """
-    random_number = np.random.randint(0, side * side - 1)
-    dest_array = []
-    for _ in range(len(eligible_driver_table)):
-        record = result[result['grid_id'] == random_number]
-        if len(record) > 0:
-            dest_array.append([record.iloc[0]['lng'], record.iloc[0]['lat']])
-        else:
-            dest_array.append([result.iloc[0]['lng'], result.iloc[0]['lat']])
-    coord_array = eligible_driver_table.loc[:, ['lng', 'lat']].values
+    all_grid_ids = list(grid_adjacency.keys())
+    dest_array = [grid_id_to_first_coords[random.choice(all_grid_ids)] for _ in eligible_driver_table['grid_id']]
+    coord_array = eligible_driver_table[['lng', 'lat']].values
     itinerary_node_list, itinerary_segment_dis_list, dis_array = route_generation_array(coord_array, np.array(dest_array))
     return itinerary_node_list, itinerary_segment_dis_list, dis_array
 
-
-
-def cruising(eligible_driver_table, mode,grid_value ={}):
+def cruising(eligible_driver_table, mode):
     """
     :param eligible_driver_table: information of eligible driver.
     :type eligible_driver_table: pandas.DataFrame
-    :param mode: the type of both-rg-cruising, if type is random; it can cruise to every node with equal
-                probability; if the type is nearby, it will cruise to the node in adjacent grid or
-                just stay at the original region.
+    :param mode: the type of cruising, 'global-random' for cruising to any grid,
+                 'random' for cruising to a random adjacent grid, and 'nearby'
+                 for cruising to an adjacent grid or staying at the original grid.
     :type mode: string
+    :param grid_adjacency: a dictionary mapping each grid_id to a list of its neighbors.
+    :type grid_adjacency: dict
+    :param result: a DataFrame containing lng and lat information for each grid_id.
+    :type result: pandas.DataFrame
     :return: itinerary_node_list, itinerary_segment_dis_list, dis_array
     :rtype: tuple
     """
     dest_array = []
-    grid_id_list = eligible_driver_table.loc[:, 'grid_id'].values
-    for grid_id in (grid_id_list):
-        if mode == "global-random":
-            random_number = random.randint(0,side*side-1)
-        elif mode == 'random':
-            target = [grid_id]
-            if int((grid_id - 1) / side) == int(grid_id / side) and grid_id - 1 > 0:
-                target.append(grid_id - 1)
-            if int((grid_id + 1) / side) == int(grid_id / side) and grid_id + 1 < side * side:
-                target.append(grid_id + 1)
-            if grid_id + side < side * side:
-                target.append(grid_id + side)
-            if grid_id - side > 0:
-                target.append(grid_id - side)
-            random_number = choice(target)
-        elif mode == 'nearby':
-            target = []
-            if int((grid_id - 1) / side) == int(grid_id / side) and grid_id - 1 > 0:
-                target.append(grid_id - 1)
-            if int((grid_id + 1) / side) == int(grid_id / side) and grid_id + 1 < side * side:
-                target.append(grid_id + 1)
-            if grid_id + side < side * side:
-                target.append(grid_id + side)
-            if grid_id - side > 0:
-                target.append(grid_id - side)
-            random_number = choice(target)
-        record = result[result['grid_id'] == random_number]
-        if len(record) > 0:
-            dest_array.append([record.iloc[0]['lng'], record.iloc[0]['lat']])
-        else:
-            dest_array.append([result.iloc[0]['lng'], result.iloc[0]['lat']])
-    coord_array = eligible_driver_table.loc[:, ['lng', 'lat']].values
-    itinerary_node_list, itinerary_segment_dis_list, dis_array = route_generation_array(coord_array,
-                                                                                        np.array(dest_array))
+    if mode == "global-random":
+        all_grid_ids = list(grid_adjacency.keys())
+        dest_array = [grid_id_to_first_coords[random.choice(all_grid_ids)] for _ in eligible_driver_table['grid_id']]
+    else:
+        for grid_id in eligible_driver_table['grid_id']:
+            # For modes 'random' and 'nearby', continue to use the loop
+            if mode == 'random':
+                potential_targets = grid_adjacency.get(grid_id, {grid_id})  # Use set for O(1) lookups
+                random_number = random.choice(list(potential_targets))
+
+            elif mode == 'nearby':
+                potential_targets = grid_adjacency.get(grid_id, None)
+                if potential_targets:
+                    random_number = random.choice(list(potential_targets))
+                else:
+                    raise ValueError(f'Grid {grid_id} has no adjacent grids available for "nearby" mode.')
+
+            # Fetch the lng and lat values for the chosen grid_id
+            lng_lat = grid_id_to_first_coords[random_number]
+            dest_array.append(lng_lat)
+
+    # Convert dest_array to a numpy array 
+    dest_array_np = np.array(dest_array)
+
+    # Assume route_generation_array is a function you have defined elsewhere
+    coord_array = eligible_driver_table[['lng', 'lat']].values
+    itinerary_node_list, itinerary_segment_dis_list, dis_array = route_generation_array(coord_array, dest_array_np)
+
     return itinerary_node_list, itinerary_segment_dis_list, dis_array
 
 
@@ -817,11 +811,8 @@ def get_nodeId_from_coordinate(lng, lat):
     :return:  id of node
     :rtype: string
     """
-    node_list = []
-    for i in range(len(lat)):
-        x = node_coord_to_id[(lng[i],lat[i])]
-        node_list.append(x)
-    return node_list
+    # Using list comprehension for a more compact and slightly faster execution
+    return [node_coord_to_id[(lng[i], lat[i])] for i in range(len(lat))]
 
 def KM_simulation(wait_requests, driver_table, method = 'nothing'):
     # currently, we use the dispatch alg of peibo
