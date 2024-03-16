@@ -2,15 +2,13 @@ from simulator_env import Simulator
 import numpy as np
 from config import *
 from path import *
-import time
-from tqdm import tqdm
 import warnings
 import torch
 warnings.filterwarnings("ignore")
 import logging
 from utilities import *
 import argparse
-import training, testing
+import train_test
 from datetime import datetime
 from path import *
 
@@ -78,31 +76,32 @@ if __name__ == "__main__":
     
     if args.radius_method == 'rl':
         loss_logger = get_logger(logger_name='model_loss', log_file=f'{args.rl_agent}_loss')
-        logger = get_logger(logger_name='metrics_logger', log_file=f'{args.rl_agent}', formatter_pattern='%(asctime)s - %(message)s', console=True)
+        logger = get_logger(logger_name='metrics_logger', log_file=f'{args.rl_agent}_{args.experiment_mode}', formatter_pattern='%(asctime)s - %(message)s', console=True)
     elif args.radius_method == 'fixed':
         logger = get_logger(logger_name='metrics_logger', log_file=f'{args.radius_method}_r{args.radius}', formatter_pattern='%(asctime)s - %(message)s', console=True)
 
     # Initialize the simulator 
     simulator = Simulator(**env_params)
     # Adjust the simulator environment based on command line arguments
-    training.update_simulator_args(simulator, args)
+    train_test.update_simulator_args(simulator, args)
 
     if simulator.radius_method == "rl" and simulator.experiment_mode == 'train':
         logging.info("RL training process:")
-        agent = training.create_agent(args)
+        agent = train_test.create_agent(args)
         # Load pre-trained model if necessary
-        training.load_pretrained_model(agent, args, env_params)
+        if env_params['pre_trained']:
+            train_test.load_pretrained_model(agent, args, env_params, model_epoch=100)
         # Run simulation - train mode
-        training.simulation_train(args, agent, simulator, logger, loss_logger)
+        train_test.simulation_train(args, agent, simulator, logger, loss_logger)
         # Close TensorBoard writer 
         agent.train_writer.close()
 
     elif simulator.radius_method == "rl" and simulator.experiment_mode == 'test':
         logging.info("RL testing process:")
         # Initialize the RL agent for matching radius (dqn, double dqn, etc...)
-        agent = training.create_agent(args)
+        agent = train_test.create_agent(args)
         # Load pre-trained model for validation & testing
-        training.load_pretrained_model(agent, args, env_params,model_epoch=7)  
+        train_test.load_pretrained_model(agent, args, env_params,model_epoch=100)  
         # Run simulation - test mode   
         testing.simulation_test(args, agent, simulator, logger, test_num=10)
         # Close TensorBoard writer
@@ -111,7 +110,7 @@ if __name__ == "__main__":
     elif simulator.radius_method == "fixed":
         logging.info(f"fixed radius = {simulator.maximal_pickup_distance}")
         # Initialize the RL agent for matching radius (dqn, double dqn, etc...)
-        training.simulation_fixed(simulator, logger, test_num=10)
+        train_test.simulation_fixed(simulator, logger, test_num=10)
         
     elif simulator.radius_method == "greedy":
         logging.info(f"greedy radius")

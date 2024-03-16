@@ -72,7 +72,7 @@ def create_agent(args):
         raise ValueError(f"RL agent type '{args.rl_agent}' is not recognized.")
     return agent
 
-def load_pretrained_model(agent, args, env_params, model_epoch=0):
+def load_pretrained_model(agent, args, env_params, model_epoch):
     '''
     Load pre-trained model during test stage, or if specified during train stage
     '''
@@ -80,7 +80,7 @@ def load_pretrained_model(agent, args, env_params, model_epoch=0):
         models_dir = "models"
         if not os.path.exists(models_dir):
             os.makedirs(models_dir)
-        parameter_path = os.path.join(models_dir, f"{args.rl_agent}_epoch{model_epoch}_{args.adjust_reward}_model.pth")
+        parameter_path = os.path.join(models_dir, f"{args.rl_agent}_epoch{model_epoch}_model.pth")
         agent.load_parameters(parameter_path)
         logging.info("pre-trained model is loaded")
 
@@ -116,7 +116,7 @@ def simulation_train(args, agent, simulator, logger, loss_logger):
             # Reset simulator
             simulator.reset()
 
-            for step in range(simulator.finish_run_step):
+            for _ in range(simulator.finish_run_step):
                 losses = []
                 if simulator.wait_requests.shape[0] > 0:
                     states = get_states(simulator)
@@ -164,7 +164,25 @@ def simulation_train(args, agent, simulator, logger, loss_logger):
             parameter_path = os.path.join(models_dir, f"{args.rl_agent}_{epoch}_model.pth")
             agent.save_parameters(parameter_path)
 
-    
+def simulation_test(args, agent, simulator, logger, test_num=10):
+
+    for num in range(test_num):
+        print('test round: ', num)
+
+        for date in TEST_DATE_LIST:
+            simulator.experiment_date = date
+            simulator.reset()
+
+            for _ in range(simulator.finish_run_step):
+                if simulator.wait_requests.shape[0] > 0:
+                    states = get_states(simulator)
+                    action_indices, matching_radius = get_actions_given_states(agent, states, args)
+                    simulator.wait_requests['action_index'] = action_indices
+                    simulator.wait_requests['matching_radius'] = matching_radius
+                simulator.step()  # observe the transition
+
+        logger.info(f"epoch : {num} == total_reward:{simulator.total_reward},matching_rate:{simulator.matched_requests_num/simulator.total_request_num},total_request_num:{simulator.total_request_num},matched_request_num:{simulator.matched_requests_num},occupancy_rate:{simulator.occupancy_rate},occupancy_rate_no_pickup:{simulator.occupancy_rate_no_pickup},wait_time:{simulator.waiting_time / simulator.matched_requests_num},pickup_time:{simulator.pickup_time / simulator.matched_requests_num}")
+
 def simulation_fixed(simulator, logger=None, test_num=10):
     date_list = TRAIN_DATE_LIST if simulator.experiment_mode == 'train' else TEST_DATE_LIST
             
@@ -210,21 +228,3 @@ def simulation_greedy(simulator, test_num, logger):
             end_time = time.time()
             logger.info(f"epoch : {num} == total_reward:{simulator.total_reward},matching_rate:{simulator.matched_requests_num/simulator.total_request_num},total_request_num:{simulator.total_request_num},matched_request_num:{simulator.matched_requests_num},occupancy_rate:{simulator.occupancy_rate},occupancy_rate_no_pickup:{simulator.occupancy_rate_no_pickup},wait_time:{simulator.waiting_time / simulator.matched_requests_num},pickup_time:{simulator.pickup_time / simulator.matched_requests_num}")
 
-def simulation_test(args, agent, simulator, logger, test_num=10):
-
-    for num in range(test_num):
-        print('test round: ', num)
-
-        for date in TEST_DATE_LIST:
-            simulator.experiment_date = date
-            simulator.reset()
-
-            for _ in range(simulator.finish_run_step):
-                if simulator.wait_requests.shape[0] > 0:
-                    states = get_states(simulator)
-                    action_indices, matching_radius = get_actions_given_states(agent, states, args)
-                    simulator.wait_requests['action_index'] = action_indices
-                    simulator.wait_requests['matching_radius'] = matching_radius
-                simulator.step()  # observe the transition
-
-        logger.info(f"epoch : {num} == total_reward:{simulator.total_reward},matching_rate:{simulator.matched_requests_num/simulator.total_request_num},total_request_num:{simulator.total_request_num},matched_request_num:{simulator.matched_requests_num},occupancy_rate:{simulator.occupancy_rate},occupancy_rate_no_pickup:{simulator.occupancy_rate_no_pickup},wait_time:{simulator.waiting_time / simulator.matched_requests_num},pickup_time:{simulator.pickup_time / simulator.matched_requests_num}")
