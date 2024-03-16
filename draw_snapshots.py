@@ -9,6 +9,7 @@ import networkx as nx
 import osmnx as ox
 import shapely.wkt
 from shapely.geometry import LineString
+import matplotlib.patches as patches
 
 '''
 The subsystem of the control center that visualizes the results

@@ -1,18 +1,3 @@
-#!/usr/bin/python3
-# -*- coding:utf-8 -*-
-"""
-@author: zhangyuhao
-@file: order_generation.py
-@time: 2022/2/6 下午2:40
-@email: yuhaozhang76@gmail.com
-@desc: 
-"""
-
-'''
-    This util script was under 'simulator', now it is in 'simulator/test'. You may need
-    to update path related codes in order to successfully run the code without errors.
-'''
-
 from find_closest_point import find_closest_point
 from utilities import get_zone
 import pandas as pd
@@ -23,6 +8,23 @@ from utilities import G
 import warnings
 
 warnings.filterwarnings("ignore")
+
+def input_for_simulator(input_path, output_path,sample_rate=0.5):
+    data = pd.read_csv(input_path)
+    data.drop(['timestamp', 'date', 'fare'], axis=1, inplace=True)
+    # sample from the data
+    data = data.sample(frac=sample_rate, replace=False)
+
+    pickup_time = data['start_time'].tolist()
+    requests = {}
+    for i, item in tqdm(enumerate(pickup_time)):
+        if item not in requests.keys():
+            requests[item] = [data.iloc[i].tolist()]
+        else:
+            requests[item].append(data.iloc[i].tolist())
+    
+    with  open(output_path, 'wb') as f:     
+        pickle.dump(requests, f)
 
 
 def csv_to_pickle(input_file, output_file):
@@ -67,13 +69,13 @@ def csv_to_pickle(input_file, output_file):
             if item[11] is None or len(item[11]) <= 1:
                 print(item[11])
                 requests[key].remove(item)
-                
-    pickle.dump(requests, open(output_file, 'wb'))
+    with  open(output_file, 'wb') as f:     
+        pickle.dump(requests, f)
 
 
-def nyu_add_node_id_grid():
-    raw_data = pickle.load(open('../input/requests_real_data.pickle', 'rb'))
-    day = '2015-07-01'
+def nyu_add_node_id_grid(path, day):
+    with open(path, 'rb') as f:
+        raw_data = pickle.load(f)
     data = raw_data[day]
     results = {}
     for second in tqdm(data):
@@ -96,15 +98,20 @@ def nyu_add_node_id_grid():
             ori_grid_id = get_zone(temp_ori_lat, temp_ori_lng)
             dest_grid_id = get_zone(temp_dest_lat, temp_dest_lng)
             itenerary_list = ox.distance.shortest_path(G, ori_id, dest_id, weight='length', cpus=1)
-            # order[7] = distance
             records = ['CMT', order[7], temp_ori_lng, temp_ori_lat, temp_dest_lng, temp_dest_lat, 0, ori_id,
-                       dest_id, ori_grid_id, dest_grid_id, itenerary_list, [], 1, 0]
+                    dest_id, ori_grid_id, dest_grid_id, itenerary_list, [], 1, 0]
 
             results[minute].append(records)
-    pickle.dump(results, open('../output/nyu_07_01.pickle', 'wb'))
+    with open(path, 'wb') as f:
+        pickle.dump(results, f)
 
 
 if __name__ == '__main__':
-    output_file = '../output/multi_thread_order.pickle'
-    csv_to_pickle('multi_thread.csv', output_file)
-    # nyu_add_node_id_grid()
+    dates = ["2015-05-04", "2015-05-11"]
+    for date in dates:
+        output_path = f"input_generation/{date}.pickle"
+        print(output_path)
+        csv_to_pickle(f'input_generation/1NYU_{date}.csv', output_path)
+        # nyu_add_node_id_grid(output_path, date)
+
+        

@@ -4,12 +4,12 @@ import os
 from dqn import DqnAgent
 from ddqn import DDqnAgent
 from dueling_dqn import DuelingDqnAgent
-from log_generation import EpochPerformanceTracker, ActionTracker
+from log_generation import ActionTracker
 from config import *
 from utilities import *
 from draw_snapshots import draw_simulation
 
-def adjust_simulator(simulator, args):
+def update_simulator_args(simulator, args):
     '''
     Adjust the simulator environment based on command line arguments.
 
@@ -30,8 +30,7 @@ def adjust_simulator(simulator, args):
     simulator.rl_agent = args.rl_agent
     simulator.adjust_reward_by_radius = args.adjust_reward
     simulator.maximal_pickup_distance = args.radius # for rl_mode == fixed
-    simulator.cruise_flag = args.cruise == 1
-    
+ 
     if simulator.adjust_reward_by_radius: 
         logging.info("reward adjusted by radius")
     else:
@@ -104,28 +103,12 @@ def get_actions_given_states(agent, states, args):
     matching_radius = [args.action_space[i] for i in action_indices]
     return action_indices, matching_radius
 
-def results_output(simulator, performance_tracker, start_time, end_time, epoch, date):
-    print(f'epoch: {epoch} date:{date}')
-    print('epoch running time: ', end_time - start_time)
-    if simulator.experiment_mode == "train":
-        print('epoch average loss: ', np.mean(performance_tracker.epoch_loss))
-    print('epoch total reward: ', simulator.total_reward)
-    print('total orders', simulator.total_request_num)
-    print('matched orders', simulator.matched_requests_num)
-    print('total adjusted reward', simulator.total_reward_per_pickup_dist)
-    print('matched order ratio', simulator.matched_requests_num / simulator.total_request_num)
 
-def simulation_train(args, agent, simulator, model_tracker, draw_snapshot=False, draw_freq=12):
-    # Initialize EpochPerformanceTracker to manage the metrics across the training process
-    performance_tracker = EpochPerformanceTracker(simulator.experiment_mode, simulator.radius_method)
-    # Initialize ActionTracker to collect the action distribution
-    actions_dist = ActionTracker()
+def simulation_train(args, agent, simulator, logger, loss_logger):
+    models_dir = os.path.join("models", args.rl_agent)
+    os.makedirs(models_dir, exist_ok=True)
 
     for epoch in range(NUM_EPOCH):
-        # Reset performance metrics tracker at epoch level
-        performance_tracker.reset()
-        # Initialize action collector at epoch level
-        actions_dist.init_new_epoch(epoch)
         # Initialize replay_buffer
         replay_buffer = ReplayBuffer()
 
@@ -134,16 +117,13 @@ def simulation_train(args, agent, simulator, model_tracker, draw_snapshot=False,
             simulator.experiment_date = date
             # Reset simulator
             simulator.reset()
-            # Initialize action collector at date level
-            actions_dist.init_new_date(epoch, date)
 
-            start_time = time.time()
             for step in range(simulator.finish_run_step):
+                losses = []
                 if simulator.wait_requests.shape[0] > 0:
                     states = get_states(simulator)
                     action_indices, matching_radius = get_actions_given_states(agent, states, args)
                     # Append the action distribution at time step t to the list
-                    actions_dist.insert_time_step(args, action_indices)
                     simulator.wait_requests['action_index'] = action_indices
                     simulator.wait_requests['matching_radius'] = matching_radius
                 
@@ -178,98 +158,46 @@ def simulation_train(args, agent, simulator, model_tracker, draw_snapshot=False,
                     for i in range(10):
                         states, action_indices, rewards, next_states, done = replay_buffer.sample(BATCH_SIZE)
                         agent.learn(states, action_indices, rewards, next_states, done)
-                        # Keep track of the loss per learning iteration
-                        performance_tracker.add_loss_per_learning_step(agent.loss)
+                        losses.append(agent.losses)
+            
+            loss_logger.info(f"epoch:{epoch}, average_loss: {np.mean(agent.losses)}")
+            logger.info(f"epoch: {epoch} == total_reward:{simulator.total_reward},matching_rate:{simulator.matched_requests_num/simulator.total_request_num},total_request_num:{simulator.total_request_num},matched_request_num:{simulator.matched_requests_num},occupancy_rate:{simulator.occupancy_rate},occupancy_rate_no_pickup:{simulator.occupancy_rate_no_pickup},wait_time:{simulator.waiting_time / simulator.matched_requests_num},pickup_time:{simulator.pickup_time / simulator.matched_requests_num}")
+        if epoch >= 100:
+            parameter_path = os.path.join(models_dir, f"{args.rl_agent}_{epoch}_model.pth")
+            agent.save_parameters(parameter_path)
 
-                if draw_snapshot and step % draw_freq == 0:
-                    draw_simulation(simulator, "./input/graph.graphml", f"{args.rl_agent}_{args.adjust_reward}", epoch, step)
-
-            # Store the action distribution list to the dictionary
-            actions_dist.end_time_step(epoch, date)
-
-            end_time = time.time()
-                
-            results_output(simulator, performance_tracker, start_time, end_time, epoch, date)
-
-            performance_tracker.add_within_epoch(simulator.total_reward, simulator.total_reward_per_pickup_dist, 
-                                           simulator.total_request_num, simulator.matched_requests_num,
-                                           simulator.occupancy_rate, simulator.occupancy_rate_no_pickup,
-                                           simulator.pickup_time, simulator.waiting_time, end_time - start_time)
-        
-        # add scalar to TensorBoard
-        performance_tracker.add_to_tensorboard(epoch, agent)
-        # store in record dict  
-        performance_tracker.add_to_metrics_data()
-        # save the action distribution
-        actions_dist.save_actions_distribution(args)
-
-        # save RL model parameters
-        if (epoch > 5 and epoch % 2 == 1) or epoch == NUM_EPOCH - 1:
-            model_tracker.save_model(agent, simulator.rl_agent, epoch, simulator.adjust_reward_by_radius)
-    # serialize the record
-    performance_tracker.save( experiment_mode=simulator.experiment_mode, radius_method=simulator.radius_method, 
-                    adjust_reward=simulator.adjust_reward_by_radius,  rl_agent=args.rl_agent)
     
-def simulation_fixed(simulator, test_num):
+def simulation_fixed(simulator, logger=None, test_num=10):
     date_list = TRAIN_DATE_LIST if simulator.experiment_mode == 'train' else TEST_DATE_LIST
             
     for date in date_list:
         simulator.experiment_date = date
-        performance_tracker = EpochPerformanceTracker(simulator.experiment_mode, simulator.radius_method, date, simulator.maximal_pickup_distance)
         for num in range(test_num):
             print('test round: ', num)
-            performance_tracker.reset()
             simulator.reset()
-            start_time = time.time()
-            for step in range(simulator.finish_run_step):
-                # observe the transition and store the transition in the replay buffer (simulator.dispatch_transitions_buffer)
+            for _ in range(simulator.finish_run_step):
                 simulator.step()
-            end_time = time.time()
-
-            performance_tracker.add_within_epoch(simulator.total_reward, simulator.total_reward_per_pickup_dist, 
-                                        simulator.total_request_num, simulator.matched_requests_num,
-                                        simulator.occupancy_rate, simulator.occupancy_rate_no_pickup,
-                                        simulator.pickup_time, simulator.waiting_time, end_time - start_time)
-            results_output(simulator, performance_tracker, start_time, end_time, num, date)
-            # store in record dict  
-            performance_tracker.add_to_metrics_data()
-
-        # serialize the record
-        performance_tracker.save(adjust_reward=simulator.adjust_reward_by_radius, experiment_mode=simulator.experiment_mode, 
-                    radius_method=simulator.radius_method, radius=simulator.maximal_pickup_distance, date=date)
+            
+            logger.info(f"epoch: {num} == total_reward:{simulator.total_reward},matching_rate:{simulator.matched_requests_num/simulator.total_request_num},total_request_num:{simulator.total_request_num},matched_request_num:{simulator.matched_requests_num},occupancy_rate:{simulator.occupancy_rate},occupancy_rate_no_pickup:{simulator.occupancy_rate_no_pickup},wait_time:{simulator.waiting_time / simulator.matched_requests_num},pickup_time:{simulator.pickup_time / simulator.matched_requests_num}")
+          
         
-def simulation_greedy(simulator, test_num):
+def simulation_greedy(simulator, test_num, logger):
     date_list = TRAIN_DATE_LIST if simulator.experiment_mode == 'train' else TEST_DATE_LIST
             
     for date in date_list:
         simulator.experiment_date = date
-        performance_tracker = EpochPerformanceTracker(simulator.experiment_mode, simulator.radius_method, date, simulator.maximal_pickup_distance)
         for num in range(test_num):
             print('test round: ', num)
-            performance_tracker.reset()
             simulator.reset()
-            start_time = time.time()
             for _ in range(simulator.finish_run_step):
                 # observe the transition and store the transition in the replay buffer (simulator.dispatch_transitions_buffer)
                 simulator.step()
-            end_time = time.time()
+            logger.info(f"epoch: {num} == total_reward:{simulator.total_reward},matching_rate:{simulator.matched_requests_num/simulator.total_request_num},total_request_num:{simulator.total_request_num},matched_request_num:{simulator.matched_requests_num},occupancy_rate:{simulator.occupancy_rate},occupancy_rate_no_pickup:{simulator.occupancy_rate_no_pickup},wait_time:{simulator.waiting_time / simulator.matched_requests_num},pickup_time:{simulator.pickup_time / simulator.matched_requests_num}")
+            
 
-            performance_tracker.add_within_epoch(simulator.total_reward, simulator.total_reward_per_pickup_dist, 
-                                        simulator.total_request_num, simulator.matched_requests_num,
-                                        simulator.occupancy_rate, simulator.occupancy_rate_no_pickup,
-                                        simulator.pickup_time, simulator.waiting_time, end_time - start_time)
-            results_output(simulator, performance_tracker, start_time, end_time, num, date)
-            # store in record dict  
-            performance_tracker.add_to_pickle_file()
-
-
-    epoch_log = EpochPerformanceTracker(args.experiment_mode)
     test_num = 10
     for num in range(test_num):
         print('test round: ', num)
-
-        # clear former epoch log
-        epoch_log.reset()
 
         date_list = None
         date_list = TRAIN_DATE_LIST if simulator.experiment_mode == 'train' else TEST_DATE_LIST
@@ -282,21 +210,4 @@ def simulation_greedy(simulator, test_num):
             for step in range(simulator.finish_run_step):
                 simulator.step()
             end_time = time.time()
-
-            epoch_log.add_within_epoch(simulator.total_reward, simulator.total_reward_per_pickup_dist, 
-                                        simulator.total_request_num, simulator.matched_requests_num,
-                                        simulator.occupancy_rate, simulator.occupancy_rate_no_pickup,
-                                        simulator.pickup_time, simulator.waiting_time, end_time - start_time)
-        
-        print("total reward", sum(epoch_log.total_reward))
-        print("total adjusted reeward", sum(epoch_log.total_adjusted_reward))
-        print("pick", np.mean(epoch_log.pickup_time))
-        print("wait", np.mean(epoch_log.waiting_time))
-        print("matching ratio", sum(epoch_log.matched_requests_num)/ sum(epoch_log.total_request_num))
-        print("ocu rate", np.mean(epoch_log.occupancy_rate))
-
-        # store in record dict  
-        epoch_log.add_to_pickle_file(test_log.record_dict)
-
-    # serialize the record
-    test_log.save(rl_agent=None, adjust_reward=simulator.adjust_reward_by_radius, experiment_mode=simulator.experiment_mode, radius_method=simulator.radius_method, actions=simulator.action_collection)
+            logger.info(f"epoch : {num} == total_reward:{simulator.total_reward},matching_rate:{simulator.matched_requests_num/simulator.total_request_num},total_request_num:{simulator.total_request_num},matched_request_num:{simulator.matched_requests_num},occupancy_rate:{simulator.occupancy_rate},occupancy_rate_no_pickup:{simulator.occupancy_rate_no_pickup},wait_time:{simulator.waiting_time / simulator.matched_requests_num},pickup_time:{simulator.pickup_time / simulator.matched_requests_num}")

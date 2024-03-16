@@ -86,7 +86,7 @@ class DqnAgent:
                                      self.lr).to(device)
 
         # to plot the loss curve
-        self.loss = 0
+        self.losses = 0
         current_time = datetime.now().strftime('%b%d_%H-%M-%S')
         if self.experiment_mode == "train":
             # Create a SummaryWriter object and specify the log directory
@@ -148,7 +148,7 @@ class DqnAgent:
         loss = self.eval_net.loss(q_target, q_eval)
 
         # to plot the loss curve
-        self.loss = loss.item()
+        self.losses = loss.item()
 
         self.eval_net.optimizer.zero_grad()
         loss.backward()

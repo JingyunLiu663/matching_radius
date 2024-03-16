@@ -10,13 +10,16 @@ warnings.filterwarnings("ignore")
 import logging
 from utilities import *
 import argparse
-from log_generation import ModelTracker, EpochPerformanceTracker
+from log_generation import ModelTracker
 import training, testing
+from datetime import datetime
+from path import *
 
 def get_args():
     parser = argparse.ArgumentParser()
     
     parser.add_argument('-radius', type=float, default=1.0, help="for radius method = 'fixed', max pickup radius")
+    # for RL 
     parser.add_argument('-rl_agent', type=str, default="dqn", help='RL agent') 
     parser.add_argument('-action_space', type=float, nargs='+',
                         default=[0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0, 2.25, 2.5],
@@ -32,12 +35,11 @@ def get_args():
     parser.add_argument('-eps_min', type=float, default=0.01, help='epsilon greedy - end epsilon')
     parser.add_argument('-eps_dec', type=float, default=0.9978, help='epsilon greedy - epsilon decay per step')
     parser.add_argument('-target_update', type=int, default=2000, help='update frequency for target network')
-
     parser.add_argument('-adjust_reward', type=int, default=0, 
                         help='apply immediate reward(0), or adjust the reward by matching radius(1)') 
-    parser.add_argument('-radius_method', type=str, default="rl", help='rl/fixed/greedy') 
+    # for RL
+    parser.add_argument('-radius_method', type=str, default="fixed", help='rl/fixed/greedy') 
     parser.add_argument('-experiment_mode', type=str, default="train", help="train/test")
-    parser.add_argument('-cruise', type=int, default=1, help="cruise flag")
     args = parser.parse_args()
     return args
 
@@ -45,26 +47,54 @@ def is_gpu_available():
     if torch.cuda.is_available():
         logging.info("GPU is available")
 
+def get_logger(logger_name, log_file, formatter_pattern=None, console=False):
+    logger = logging.getLogger(logger_name)
+    logger.setLevel(logging.INFO)
+
+    # create the directory for logging
+    os.makedirs(logger_name, exist_ok=True)
+    # attach a timestamp to the log file, write the log file to the directory
+    file_handler = logging.FileHandler(os.path.join(logger_name, f"{datetime.today()}_{log_file}.log"))
+    file_handler.setLevel(logging.INFO)
+    if formatter_pattern:
+        formatter = logging.Formatter(formatter_pattern)
+        file_handler.setFormatter(formatter)
+    logger.addHandler(file_handler)
+
+    if console:
+        console_handler = logging.StreamHandler()
+        console_handler.setLevel(logging.INFO)
+        if formatter_pattern:
+            console_handler.setFormatter(formatter)
+        logger.addHandler(console_handler)
+
+    return logger
+
 if __name__ == "__main__":
     # Check whether GPU is available
     is_gpu_available()
     # Get command line arguments
     args = get_args()
+    # Initialize metrics logger
+    
+    if args.radius_method == 'rl':
+        loss_logger = get_logger(logger_name='model_loss', log_file=f'{args.rl_agent}_loss')
+        logger = get_logger(logger_name='metrics_logger', log_file=f'{args.rl_agent}', formatter_pattern='%(asctime)s - %(message)s', console=True)
+    elif args.radius_method == 'fixed':
+        logger = get_logger(logger_name='metrics_logger', log_file=f'{args.radius_method}_r{args.radius}', formatter_pattern='%(asctime)s - %(message)s', console=True)
+
     # Initialize the simulator 
     simulator = Simulator(**env_params)
     # Adjust the simulator environment based on command line arguments
-    training.adjust_simulator(simulator, args)
+    training.update_simulator_args(simulator, args)
 
     if simulator.radius_method == "rl" and simulator.experiment_mode == 'train':
         logging.info("RL training process:")
-        # Initialize model tracker to store the RL agent parameters 
-        model_tracker = ModelTracker()
-        # Create the RL agent for matching radius (dqn, double dqn, etc...)
         agent = training.create_agent(args)
         # Load pre-trained model if necessary
         training.load_pretrained_model(agent, args, env_params)
         # Run simulation - train mode
-        training.simulation_train(args, agent, simulator, model_tracker)
+        training.simulation_train(args, agent, simulator, logger, loss_logger)
         # Close TensorBoard writer 
         agent.train_writer.close()
 
@@ -75,14 +105,14 @@ if __name__ == "__main__":
         # Load pre-trained model for validation & testing
         training.load_pretrained_model(agent, args, env_params,model_epoch=7)  
         # Run simulation - test mode   
-        testing.simulation_test(args, agent, simulator, test_num=10)
+        testing.simulation_test(args, agent, simulator, logger, test_num=10)
         # Close TensorBoard writer
         agent.test_writer.close()
 
     elif simulator.radius_method == "fixed":
         logging.info(f"fixed radius = {simulator.maximal_pickup_distance}")
         # Initialize the RL agent for matching radius (dqn, double dqn, etc...)
-        training.simulation_fixed(simulator, test_num=10)
+        training.simulation_fixed(simulator, logger, test_num=10)
         
     elif simulator.radius_method == "greedy":
         logging.info(f"greedy radius")

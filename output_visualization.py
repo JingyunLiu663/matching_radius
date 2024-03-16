@@ -11,17 +11,18 @@ def load_pickle_get_average(directory_path):
     avg_metrics = {}
     date = os.listdir(directory_path)[0].split('_')[0]
     for file in os.listdir(directory_path):
-        # get the radius
-        radius = file.split('_')[1]
-        # load the file
-        with open(os.path.join(directory_path, file), "rb") as f:
-            pickled_dict = pickle.load(f)
-        for metric, ls in pickled_dict.items():
-            if metric == "epoch_average_loss": continue
-            if metric not in avg_metrics:
-                avg_metrics[metric] = [(radius, np.mean(ls))]
-            else:
-                avg_metrics[metric].append((radius, np.mean(ls)))
+        if os.path.isfile(os.path.join(directory_path, file)):
+            # get the radius
+            radius = file.split('_')[1]
+            # load the file
+            with open(os.path.join(directory_path, file), "rb") as f:
+                pickled_dict = pickle.load(f)
+            for metric, ls in pickled_dict.items():
+                if metric == "epoch_average_loss": continue
+                if metric not in avg_metrics:
+                    avg_metrics[metric] = [(radius, np.mean(ls))]
+                else:
+                    avg_metrics[metric].append((radius, np.mean(ls)))
     # sort the tuples by radius
     for key in avg_metrics.keys():
         avg_metrics[key].sort(key=lambda x: x[0])
@@ -39,14 +40,16 @@ def plot_data(data, date, folder_path):
             continue
 
         # Start a new figure
-        plt.figure(figsize=(10, 8))
+        plt.figure(figsize=(24, 8))
         # Create a DataFrame for Seaborn
         df = pd.DataFrame(values, columns=['Radius', 'Average Value'])
         # Use Seaborn to plot the data
         sns.lineplot(x='Radius', y='Average Value', data=df, marker='o')
-        plt.xlabel('Radius')
-        plt.ylabel('Average Value')
-        plt.title(f'{key}')
+        plt.xlabel('Radius', fontsize=24)
+        plt.ylabel('Average Value', fontsize=24)
+        plt.title(f'{key}', fontsize=30)
+        plt.yticks(fontsize=16) 
+        plt.xticks(fontsize=16) 
         
         # Save the figure to the specified directory
         output_filename = os.path.join(folder_path, f'{date}_{key}.png')

@@ -20,17 +20,15 @@ from config import *
 from path import *
 import pickle
 import sys
+import os
 
 class SimulatorPattern(object):
     def __init__(self, **kwargs):
         # read parameters
-        self.simulator_mode = kwargs.pop('simulator_mode', 'simulator_mode')
         self.request_file_name = kwargs['request_file_name']
         self.driver_file_name = kwargs['driver_file_name']
-
-        if self.simulator_mode == 'toy_mode':
-            self.request_all = pickle.load(open(data_path + self.request_file_name + '.pickle', 'rb'))
-            # print(self.request_all)
-            self.driver_info = pickle.load(open(load_path + self.driver_file_name + '.pickle', 'rb')).head(env_params['driver_num'])
-            # self.driver_info = self.driver_info.sample(n=env_params['driver_num'])
-            # print(self.driver_info)
+    
+        with open(os.path.join(data_path, self.request_file_name + '.pickle'), 'rb') as f:
+            self.request_all = pickle.load(f)
+        with open(os.path.join(data_path, self.driver_file_name + '.pickle'), 'rb') as f:
+            self.driver_info = pickle.load(f).head(env_params['driver_num'])
