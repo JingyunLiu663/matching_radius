@@ -5,6 +5,7 @@ path.py
 # Ignore an entire directory
 data/
 .vscode/
+models/
 
 # Ignore all files with a specific extension
 *.log
