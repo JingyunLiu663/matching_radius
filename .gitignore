@@ -1,5 +1,6 @@
 # Ignore a single file
 dataset.csv
+path.py
 
 # Ignore an entire directory
 data/
