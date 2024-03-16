@@ -1,0 +1,18 @@
+# Ignore a single file
+dataset.csv
+
+# Ignore an entire directory
+data/
+
+# Ignore all files with a specific extension
+*.log
+
+# Ignore all files in any directory named cache
+cache/
+
+# Ignore files with names starting with `temp-`
+temp-*
+
+# Exclude all .a files except for lib.a (negation pattern)
+*.a
+!lib.a
