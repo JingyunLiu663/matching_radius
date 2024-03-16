@@ -10,7 +10,6 @@ warnings.filterwarnings("ignore")
 import logging
 from utilities import *
 import argparse
-from log_generation import ModelTracker
 import training, testing
 from datetime import datetime
 from path import *

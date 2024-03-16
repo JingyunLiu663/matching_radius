@@ -3,6 +3,7 @@ dataset.csv
 
 # Ignore an entire directory
 data/
+.vscode/
 
 # Ignore all files with a specific extension
 *.log

@@ -1,3 +1,1 @@
-load_path = "./"
-code_path = "./"
-data_path = "./data"
+data_path = "/media/4tb_hd/jingyunliu/manhattan_38grids"

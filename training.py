@@ -1,13 +1,13 @@
 import logging
 import time
 import os
-from dqn import DqnAgent
-from ddqn import DDqnAgent
-from dueling_dqn import DuelingDqnAgent
+from rl_agents.dqn import DqnAgent
+from rl_agents.ddqn import DDqnAgent
+from rl_agents.dueling_dqn import DuelingDqnAgent
 from log_generation import ActionTracker
 from config import *
 from utilities import *
-from draw_snapshots import draw_simulation
+from utils.draw_snapshots import draw_simulation
 
 def update_simulator_args(simulator, args):
     '''
